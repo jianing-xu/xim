@@ -1,64 +1,110 @@
-# xim
+# XIM
 
-基于 Netty 的即时通信 MVP，支持 Web 聊天与控制台客户端互通，使用 Maven 构建，要求 JDK 25、Maven 3.9+。
+基于 Netty 的即时通信 MVP。项目采用前后端分离结构：`frontend` 使用 React + TypeScript + Vite，`backend` 使用 Java 25 + Maven + Netty；浏览器通过 JSON WebSocket 与后端通信，同时保留 TCP 控制台客户端互通。
 
 ## 项目结构
 
-- `client`：连接与重试、控制台命令、响应分发、每 5 秒发送一次心跳。
-- `server`：登录鉴权、私聊、群组创建/加入/退出、成员列表、群消息转发。
-- `web` / `resources/web`：HTTP 静态页面、JSON WebSocket 接口和中文响应式聊天页面，复用服务端业务处理器。
-- `codec` / `protocol` / `serialize`：TCP 分帧、18 种请求/响应包及 JSON 序列化。
-- `util.SessionManager`：内存中的用户连接、会话和群组映射。
-- `handler.IMIdleStateHandler`：15 秒无入站数据时关闭连接。
-
-协议使用 11 字节包头：4 字节魔数 `0x12345678`、1 字节版本、1 字节序列化算法、1 字节命令、4 字节负载长度，后接 UTF-8 JSON 数据。
-
-服务端 pipeline 依次执行空闲检测、分帧、编解码、登录、心跳、鉴权、业务分发。客户端执行空闲检测、分帧、编解码、心跳定时器、响应分发。
-
-## 构建与运行
-
-确保 `JAVA_HOME` 和 Maven 使用 JDK 25，IDE 的项目 SDK 也设置为 25：
-
-```sh
-java -version
-mvn -version
-mvn clean verify
+```text
+xim/
+├── frontend/                  # 独立 React + TypeScript 项目
+│   ├── src/
+│   │   ├── components/        # 登录、会话列表、聊天面板、群组弹窗
+│   │   ├── App.tsx            # React 入口与页面状态订阅
+│   │   ├── chat-client.ts     # WebSocket、会话状态、心跳及重连
+│   │   ├── chat-client.test.ts # 前端行为测试
+│   │   ├── protocol.ts        # 请求、响应及会话的 TypeScript 类型
+│   │   └── styles.css         # 中文响应式聊天界面
+│   ├── .env.example           # 后端地址配置示例
+│   ├── nginx.conf             # 生产静态托管及接口代理示例
+│   ├── package.json
+│   └── vite.config.ts
+├── backend/                   # 独立 Maven 项目
+│   ├── src/main/java/cn/xjn/xim/
+│   │   ├── server/            # TCP 服务端及共享聊天业务
+│   │   ├── web/               # HTTP API、WebSocket、Origin 校验
+│   │   ├── client/            # TCP 控制台客户端
+│   │   ├── codec/             # TCP 分帧及编解码
+│   │   ├── protocol/          # 请求/响应包
+│   │   ├── serialize/         # JSON 序列化
+│   │   └── util/              # 内存会话及群组管理
+│   ├── src/test/              # 单元与集成测试
+│   ├── pom.xml
+│   └── run.sh                 # 后端启动脚本
+└── pom.xml                    # Maven 聚合入口，仅构建 backend
 ```
 
-`.java-version` 指定 Java 25。Maven 使用 `--release 25`；Lombok 通过显式注解处理器路径运行，仅在编译时使用。JUnit 仅用于测试。
+后端不再提供前端 HTML、JS 和 CSS，两个项目独立安装依赖、构建及部署。根目录仍可执行 `mvn clean verify`；前端需单独执行 npm 命令。
 
-在 IDE 中分别运行 `cn.xjn.xim.server.NettyServer` 和 `cn.xjn.xim.client.NettyClient`。服务端端口为 `8000`，客户端连接 `127.0.0.1:8000`。
+## 本地启动
 
-可通过 IDE 的 VM options 或 Java JVM 参数覆盖地址和端口：`-Dxim.host=127.0.0.1 -Dxim.port=9000`；客户端还支持 `-Dxim.maxRetry=5`（初次连接之后最多再重试 5 次）。默认服务端监听 `0.0.0.0`，客户端连接 `127.0.0.1`；服务端设置 `-Dxim.port=0` 时使用系统分配的端口，并在启动日志打印实际端口。两端都在 JVM 关闭时释放事件循环，服务端绑定失败时也会释放资源。
+要求 JDK 25、Maven 3.9+，以及 Node.js 20.19+ 或 22.12+（推荐 Node.js 24）。`.java-version` 指定 Java 25；请确保 `JAVA_HOME`、Maven 和 IDE 使用同一 JDK。
 
-演示账号及密码分别为 `root/root`、`aaa/aaa`、`bbb/bbb`、`ccc/ccc`。登录后支持 `sendToUser`、`logout`、`createGroup`、`joinGroup`、`listGroupMember`、`quitGroup`、`sendToGroup` 和 `exit` 命令；消息通过空白分隔输入。
-
-## Web 聊天
-
-启动 `cn.xjn.xim.server.NettyServer` 后，在浏览器打开 **http://127.0.0.1:8080/**。同一个进程同时监听 TCP 8000 和 HTTP/WebSocket 8080，无需 Node.js、npm 或额外前端构建。页面与 WebSocket `/ws` 同源部署。
-
-也可以从终端启动（macOS/Linux）：
+在项目根目录的第一个终端启动后端（macOS/Linux）：
 
 ```sh
-mvn package -DskipTests
-mvn dependency:build-classpath -Dmdep.outputFile=target/classpath.txt
-java -cp "target/classes:$(cat target/classpath.txt)" cn.xjn.xim.server.NettyServer
+./backend/run.sh
 ```
 
-用两个浏览器窗口分别登录 `root/root` 和 `aaa/aaa`，进入「在线」列表并选择对方即可私聊。控制台登录后的用户也会显示在在线列表中；用户名相同的不同连接通过用户 ID 区分。
+后端默认监听 TCP `8000`、HTTP/WebSocket `8080`。也可以在 IDE 中导入 `backend/pom.xml` 并运行 `cn.xjn.xim.server.NettyServer`。健康检查为 [http://127.0.0.1:8080/api/health](http://127.0.0.1:8080/api/health)，返回 `{"status":"ok","service":"xim-backend"}`；根路径 `/` 返回 404。
 
-- 页面支持会话搜索、未读计数、消息时间、多行/中文/Emoji、会话草稿和发送状态。Enter 发送，Shift + Enter 换行，并避免中文输入法确认文字时误发送。
-- 点「＋」选择在线成员创建群聊，创建者自动加入；群号显示在群聊顶部，可分享给其他用户加入。支持群成员查看与退出群聊。
-- 在线列表每 5 秒刷新；同周期发送心跳，60 秒无入站数据会关闭 WebSocket。断线后自动重连连接，恢复后需要重新登录；不保存密码。
-- 私聊接收者离线时返回失败信息；发送响应超时或断线时显示「发送结果未知」，避免把不确定结果标记为已送达。「已发送」表示服务端已接受并路由消息，不表示对方已读。
-- Web 接口校验登录状态、群成员权限和请求格式。消息长度上限 4000 个 UTF-16 单元，WebSocket 帧/聚合消息上限 64 KiB。页面通过文本节点展示消息。
-- 当前会话、消息和群号仅存于页面内存，刷新、退出或重新登录后清空；服务端用户与群组也仅存于内存。恢复连接后需要重新加入已有群组，不提供离线消息或历史记录。
+第二个终端启动前端：
 
-配置项：`-Dxim.web.port=9090` 改变 Web 端口，`-Dxim.web.port=0` 分配临时端口并打印实际端口，`-Dxim.web.port=-1` 仅启动 TCP。`xim.host` 同时控制两个监听地址。任一监听绑定失败时释放整个服务端资源。
+```sh
+cd frontend
+npm ci
+npm run dev
+```
 
-### WebSocket 接口
+浏览器打开 [http://localhost:5173](http://localhost:5173)。Vite 将 `/ws` 和 `/api` 代理到 `http://127.0.0.1:8080`，页面请求使用当前站点地址。开发端口固定为 `5173`，被占用时直接报错。
 
-请求为 JSON 文本对象，以 `type` 指定操作；消息请求可携带字符串 `requestId`，`sent`/`error` 回传该编号。
+演示账号为 `root/root`、`aaa/aaa`、`bbb/bbb`、`ccc/ccc`。用两个浏览器窗口分别登录 `root` 和 `aaa`，在「在线」列表选择对方即可私聊。
+
+前端技术配置参考 [React 文档](https://react.dev/) 和 [Vite 代理配置](https://vite.dev/config/server-options#server-proxy)。
+
+## 地址配置与部署
+
+后端 JVM 参数可直接传给启动脚本，例如：
+
+```sh
+./backend/run.sh -Dxim.host=127.0.0.1 -Dxim.port=9000 -Dxim.web.port=9090
+```
+
+| 配置 | 默认值 | 作用 |
+| --- | --- | --- |
+| `xim.host` | 服务端 `0.0.0.0`，TCP 客户端 `127.0.0.1` | 监听/连接地址 |
+| `xim.port` | `8000` | TCP 端口；服务端 `0` 使用临时端口 |
+| `xim.web.port` | `8080` | HTTP/WebSocket 端口；`0` 使用临时端口，`-1` 仅启动 TCP |
+| `xim.web.allowedOrigins` | `http://localhost:5173,http://127.0.0.1:5173` | 允许的前端 Origin，逗号分隔、精确匹配 |
+| `xim.maxRetry` | `5` | TCP 客户端首次连接之后的重试次数 |
+| `xim.log.dir` | `target/logs` | 应用日志目录，相对于启动工作目录；启动脚本使用 `backend` 目录 |
+
+更改开发代理地址时，复制 `frontend/.env.example` 为 `frontend/.env.local`，修改 `XIM_BACKEND_URL` 并重启 Vite：
+
+```dotenv
+XIM_BACKEND_URL=http://127.0.0.1:9090
+```
+
+生产环境执行 `cd frontend && npm ci && npm run build`，将 `frontend/dist/` 单独交给静态服务器托管。推荐由同一前端域名反向代理 `/ws` 和 `/api/` 至 Netty 后端；示例见 `frontend/nginx.conf`，需根据实际部署修改静态目录和后端地址。WebSocket 代理须保留 Upgrade 头，并将 Host 设置为浏览器访问的主机名（含非默认端口）。HTTPS 页面会自动使用 `wss`。
+
+如果前端直接连接独立后端域名，在构建前设置 `VITE_WS_URL=wss://api.example.com/ws`，并给后端配置 `-Dxim.web.allowedOrigins=https://chat.example.com`；Origin 不带路径和结尾斜杠。WebSocket 握手始终允许同源 Origin，以及明确列出的前端 Origin；其他浏览器来源返回 403。无 Origin 的 TCP/JDK 等非浏览器 WebSocket 客户端仍可连接。`XIM_BACKEND_URL` 只影响 Vite 开发/预览代理，不写入浏览器构建产物。
+
+本地查看构建产物可使用 `npm run preview`（同样启用接口代理）。生产部署使用静态服务器。
+
+## 聊天功能
+
+- 私聊、创建/加入/退出群聊、群成员查看；群号显示在顶部，可分享给其他用户。
+- 会话搜索、未读计数、消息时间、多行/中文/Emoji、独立会话草稿和私聊发送状态。
+- Enter 发送、Shift + Enter 换行，并避免中文输入法确认文字时误发送。
+- 每 5 秒发送心跳并刷新在线列表；60 秒没有入站数据时后端关闭 WebSocket。断线后指数退避重连，恢复连接后需要重新登录，不保存密码。
+- 请求超时或断线显示「发送结果未知」；失败时恢复草稿且不覆盖新输入。「已发送」表示服务端已接受并路由消息，不表示对方已读。
+- Web 入口检查登录、群成员权限和请求格式；消息最多 4000 个 UTF-16 单元，WebSocket 帧/聚合消息最多 64 KiB。React 以文本展示消息内容。
+- 页面内存中的消息、草稿、会话在刷新、退出或重新登录后清空；恢复登录后需重新加入已有群组，无离线消息或历史记录。
+
+在 IDE 运行 `cn.xjn.xim.client.NettyClient` 可使用 TCP 控制台客户端，默认连接 `127.0.0.1:8000`。登录后支持 `sendToUser`、`logout`、`createGroup`、`joinGroup`、`listGroupMember`、`quitGroup`、`sendToGroup`、`exit`；参数以空白分隔。TCP 用户也会显示在 Web 在线列表中，同名连接通过用户 ID 区分。
+
+## WebSocket 接口
+
+WebSocket 路径为 `/ws`。请求为 JSON 文本对象，以 `type` 指定操作；消息请求带字符串 `requestId`，`sent`/`error` 回传编号。
 
 | type | 请求字段 | 响应 |
 | --- | --- | --- |
@@ -70,60 +116,39 @@ java -cp "target/classes:$(cat target/classpath.txt)" cn.xjn.xim.server.NettySer
 | `joinGroup` | `groupId` | `joinGroup`: `success`, `groupId`, `reason` |
 | `members` | `groupId` | `members`: `groupId`, `sessions` |
 | `quitGroup` | `groupId` | `quitGroup`: `success`, `groupId` |
-| `groupMessage` | `groupId`, `message`, `requestId` | 所有群成员收到 `groupMessage`（`fromGroupId`, `fromUser`, `fromUserId`, `message`）；发送方另收到 `sent` |
+| `groupMessage` | `groupId`, `message`, `requestId` | 所有成员收到 `groupMessage`（`fromGroupId`, `fromUser`, `fromUserId`, `message`）；发送方另收到 `sent` |
 | `heartbeat` | 无 | `heartbeat` |
 
-非法请求返回 `error`（`reason`、可选 `requestId`）；登录前只允许登录和心跳。WebSocket 握手拒绝不同源的浏览器 Origin。
+非法请求返回 `error`（`reason`、可选 `requestId`）。登录前仅允许登录和心跳。类型定义见 `frontend/src/protocol.ts`。
 
-## 测试
+TCP 协议保持不变：11 字节包头（4 字节魔数 `0x12345678`、1 字节版本、1 字节序列化算法、1 字节命令、4 字节负载长度），后接 UTF-8 JSON。
+
+## 构建与测试
+
+后端可从根目录构建，或进入 `backend` 独立运行：
 
 ```sh
-mvn test                                    # 仅运行单元测试
-mvn clean verify                            # 单元测试、打包、集成测试及合并覆盖率报告
-mvn clean verify -DskipITs                   # 跳过集成测试
-mvn clean verify -Dit.test=MessagingIT       # 单元测试 + 指定的 TCP 集成测试
-mvn clean verify -Dit.test=ApplicationLifecycleIT # 单元测试 + 进程与生命周期集成测试
-mvn verify -Dit.test=WebChatIT               # 单元测试 + HTTP/WebSocket 及 Web/TCP 互通测试
+mvn test
+mvn clean verify
+mvn clean verify -DskipITs
+mvn verify -Dit.test=WebChatIT
 ```
 
-- 测试结果：`target/surefire-reports/`。
-- 集成测试结果：`target/failsafe-reports/`，使用 [Maven Failsafe](https://maven.apache.org/surefire/maven-failsafe-plugin/usage.html) 在 `verify` 构建流程运行 `*IT` 类。
-- 独立 JVM 的日志：`target/integration-logs/`，每个进程单独一个文件。
-- 覆盖率报告：`target/site/jacoco/index.html`，另提供 XML、CSV。
-- 使用 Netty `EmbeddedChannel` 验证协议与业务，不启动监听服务；pipeline 初始化测试创建未连接的 NIO channel。
-- 心跳测试通过虚拟时间推进，不等待真实心跳周期。控制台登录/登出测试保留现有各 1 秒的等待。
-- 每项测试释放 buffer/channel，清理会话和群组；测试日志只写控制台。
+测试结果位于 `backend/target/surefire-reports/` 和 `backend/target/failsafe-reports/`，独立 JVM 日志位于 `backend/target/integration-logs/`，合并覆盖率报告位于 `backend/target/site/jacoco/index.html`。
 
-覆盖范围包括全部 18 种包的编解码和协议头、Unicode 与嵌套会话序列化、分片/粘包、非法魔数/长度、未知命令/算法、登录成功与失败、空凭据、登出后鉴权、会话替换与断开清理、私聊路由、群组生命周期与广播、客户端响应分发、心跳停止、空闲关闭、pipeline 顺序及控制台命令。
+前端验证：
 
-2026-10-12 在 JDK 25.0.2、Maven 3.9.16 下完成 `clean verify`：93 项单元测试 + 14 项集成测试，共 107 项全部通过，失败/错误/跳过均为 0；合并覆盖率为行覆盖率 98.52%、分支覆盖率 95.56%，包含独立 JVM 的客户端/服务端启动代码。JaCoCo 默认过滤 Lombok 生成的方法。
+```sh
+cd frontend
+npm run typecheck
+npm test
+npm run build
+```
 
-### 集成测试
+2026-10-13 拆分版本验证：后端 `mvn clean verify` 通过 93 项单元测试和 22 项集成测试；前端 9 项行为测试通过，TypeScript 检查及 Vite 生产构建通过。前端行为测试覆盖登录/超时、心跳、Unicode 私聊与回执、失败与草稿恢复、未读、群组生命周期、断线重连和 React StrictMode 清理。后端集成测试覆盖 TCP/WebSocket 互通、健康检查、静态资源移除、允许的前端 Origin 与非法跨源拒绝。
 
-`MessagingIT` 的 9 项测试使用真实 NIO 服务端、生产服务端 pipeline 和独立的 TCP wire 客户端，覆盖失败后重新登录、Unicode 私聊、群组创建/加入/成员查询/广播/退出、登出后拒绝业务请求、断开后的会话与群成员清理、登录前心跳和鉴权、分片包头、合并帧/未知算法及非法魔数关闭。分片测试等待服务端确认每次读取，再发送下一片，避免操作系统把多次写入合并为完整帧。
+后端集成测试使用回环地址及临时端口，关闭连接、事件循环和子进程。完整验证约需 40 秒，主要等待真实心跳和重试。
 
-`ApplicationLifecycleIT` 的 5 项测试在独立 JVM 中运行生产 `main` 入口，覆盖服务端/客户端启动、控制台登录与 `exit`、连接拒绝后的真实重试成功、重试耗尽后的进程退出、端口占用时服务端退出，以及客户端心跳在超过 15 秒读空闲阈值后仍能维持连接。保留控制台 `exit` 现有的退出码 `1`。
+## 当前边界
 
-Web 版本将 `ApplicationLifecycleIT` 扩充至 6 项，额外验证生产入口提供 Web 页面，以及 Web 端口被占用时退出并释放 TCP 监听。新增 `WebChatIT` 的 6 项测试使用真实 JDK HTTP/WebSocket 客户端，覆盖静态页面、资源与 HTTP 方法、登录失败后重试、在线用户、Unicode 私聊与发送回执、离线/空白/超长消息错误、退出和重新登录、非法 JSON、群聊创建/加入/广播/成员权限/退出/断开清理、Web/TCP 私聊和群聊互通，以及跨源握手拒绝。
-
-2026-10-12 Web 版本通过 `mvn verify`：93 项单元测试 + 21 项集成测试，共 114 项，失败/错误/跳过均为 0。浏览器联调验证了登录失败后重试、两个账号双向私聊、多行与文本消息、发送状态、群聊创建与广播、成员列表、退出及重新加入，以及服务中断后的自动重连与重新登录。
-
-测试仅使用 `127.0.0.1` 和临时端口；正常服务器由系统分配端口，重试测试先取得一个未占用端口再延迟启动服务端。所有等待都有超时，测试结束关闭 socket、监听端口、事件循环和子进程，并清理注册表；意外 pipeline 异常或进程需要强制终止都会使测试失败。完整集成测试约需 30–45 秒，主要是验证真实心跳和重试间隔。
-
-JaCoCo 为每个子进程单独记录执行数据，`verify` 阶段合并单元测试、集成测试及子进程数据，再生成报告。长期运行、压力、网络丢包/延迟和 TLS 尚未测试。
-
-## 本次升级与修复
-
-- Java 8 → Java 25，Compiler Plugin 3.14.1、Surefire 3.5.4、JaCoCo 0.8.14。
-- Lombok 1.18.42，按 [官方 Maven 配置说明](https://projectlombok.org/setup/maven) 显式启用注解处理；Netty 4.1.127.Final；保留 JUnit 4 API 并升级至 4.13.2。
-- 分帧器等待完整魔数；独立解码器等待完整数据包；校验包头和长度；未知命令/算法不再输出 `null`。
-- 空密码返回登录失败；服务端断开事件继续传播；加入不存在的群组返回失败响应。
-- 鉴权处理器持续检查登录状态，拒绝登出后的业务请求并释放拒绝的消息。
-- 会话解除不会删除同一用户的新连接映射，并移除其群组成员关系；客户端断开清理会话。
-- 共享客户端响应处理器可用于多个连接；断开或移除心跳处理器时取消定时任务。
-
-## 后续边界
-
-项目仍是内存演示程序：账号硬编码、无消息持久化、无 TLS。TCP 路径的群组消息与成员查询尚未完整处理不存在的群组及成员权限（Web 入口已增加校验）；TCP 帧大小上限仍为 `Integer.MAX_VALUE`（WebSocket 上限为 64 KiB）；空群组也未自动回收。Fastjson 1.x 和现有日志依赖尚未迁移，本次验证不等同于生产安全审计。
-
-JDK 25 下 Lombok/Netty 仍可能输出 `sun.misc.Unsafe` 弃用警告；Lombok 也会提示 Packet 子类的 equals/hashCode 不包含父类字段。这些警告不影响本次构建与测试通过。
+项目是内存演示程序：账号硬编码、无消息持久化、无 TLS。TCP 群组入口尚未完整校验成员权限及不存在的群组，TCP 帧大小上限仍为 `Integer.MAX_VALUE`；空群组未自动回收。Fastjson 1.x 和原有日志依赖保留。JDK 25 下已有的 Lombok/Netty Unsafe 及 equals/hashCode 警告不影响构建与测试。
