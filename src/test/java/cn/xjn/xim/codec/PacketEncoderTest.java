@@ -1,32 +1,26 @@
 package cn.xjn.xim.codec;
 
-import cn.xjn.xim.protocol.request.LoginRequestPacket;
+import cn.xjn.xim.protocol.request.MessageRequestPacket;
+import cn.xjn.xim.support.ChannelTestSupport;
 import io.netty.buffer.ByteBuf;
-import io.netty.buffer.Unpooled;
 import io.netty.channel.embedded.EmbeddedChannel;
 import org.junit.Test;
 
-import java.util.UUID;
-
 import static org.junit.Assert.*;
 
-/**
- * @author xjn
- * @date 2023-12-26
- */
-public class PacketEncoderTest {
-
+public class PacketEncoderTest extends ChannelTestSupport {
     @Test
-    public void test_encode() {
-        EmbeddedChannel embeddedChannel = new EmbeddedChannel(new PacketEncoder());
-        LoginRequestPacket source = new LoginRequestPacket();
-        String username = UUID.randomUUID().toString();
-        source.setUsername(username);
-        source.setPassword("123456");
-        embeddedChannel.writeOutbound(source);
-        LoginRequestPacket target = (LoginRequestPacket) PacketCodec.INSTANCE.decode(embeddedChannel.readOutbound());
-
-        assertEquals(source.getUsername(), target.getUsername());
-        assertEquals(source.getPassword(), target.getPassword());
+    public void encodesOutboundMessage() {
+        EmbeddedChannel channel = channel(new PacketEncoder());
+        MessageRequestPacket source = new MessageRequestPacket("user-2", "你好 🌍");
+        assertTrue(channel.writeOutbound(source));
+        ByteBuf buffer = channel.readOutbound();
+        try {
+            MessageRequestPacket decoded = (MessageRequestPacket) PacketCodec.INSTANCE.decode(buffer);
+            assertEquals(source.getToUserId(), decoded.getToUserId());
+            assertEquals(source.getMessage(), decoded.getMessage());
+        } finally {
+            buffer.release();
+        }
     }
 }

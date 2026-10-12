@@ -13,6 +13,8 @@ public class GroupMessageResponsePacket extends Packet {
 
     private String fromUser;
 
+    private String fromUserId;
+
     private String fromGroupId;
 
     private String message;

@@ -1,49 +1,39 @@
 package cn.xjn.xim.codec;
 
 import cn.xjn.xim.protocol.request.LoginRequestPacket;
+import cn.xjn.xim.support.ChannelTestSupport;
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.Unpooled;
 import io.netty.channel.embedded.EmbeddedChannel;
 import org.junit.Test;
 
-import java.util.UUID;
+import static org.junit.Assert.*;
 
-import static org.junit.Assert.assertEquals;
-
-/**
- * @author xjn
- * @date 2023-12-26
- */
-public class PacketCodecHandlerTest {
-
+public class PacketCodecHandlerTest extends ChannelTestSupport {
     @Test
-    public void test_decode() {
-        EmbeddedChannel embeddedChannel = new EmbeddedChannel(PacketCodecHandler.INSTANCE);
-        LoginRequestPacket sourcePacket = new LoginRequestPacket();
-        String username = UUID.randomUUID().toString();
-        sourcePacket.setUsername(username);
-        sourcePacket.setPassword("123456");
-        ByteBuf byteBuf = Unpooled.buffer();
-        PacketCodec.INSTANCE.encode(byteBuf, sourcePacket);
-
-        embeddedChannel.writeInbound(byteBuf);
-        LoginRequestPacket target = embeddedChannel.readInbound();
-
-        assertEquals(sourcePacket.getUsername(), target.getUsername());
-        assertEquals(sourcePacket.getPassword(), target.getPassword());
+    public void encodesAndDecodesAcrossIndependentChannels() {
+        EmbeddedChannel sender = channel(PacketCodecHandler.INSTANCE);
+        EmbeddedChannel receiver = channel(PacketCodecHandler.INSTANCE);
+        LoginRequestPacket source = new LoginRequestPacket();
+        source.setUsername("root");
+        source.setPassword("root");
+        assertTrue(sender.writeOutbound(source));
+        ByteBuf buffer = sender.readOutbound();
+        assertTrue(receiver.writeInbound(buffer));
+        LoginRequestPacket decoded = receiver.readInbound();
+        assertEquals(source.getUsername(), decoded.getUsername());
+        assertEquals(source.getPassword(), decoded.getPassword());
+        assertEquals(0, buffer.refCnt());
     }
 
     @Test
-    public void test_encode() {
-        EmbeddedChannel embeddedChannel = new EmbeddedChannel(PacketCodecHandler.INSTANCE);
-        LoginRequestPacket source = new LoginRequestPacket();
-        String username = UUID.randomUUID().toString();
-        source.setUsername(username);
-        source.setPassword("123456");
-        embeddedChannel.writeOutbound(source);
-        LoginRequestPacket target = (LoginRequestPacket) PacketCodec.INSTANCE.decode(embeddedChannel.readOutbound());
-
-        assertEquals(source.getUsername(), target.getUsername());
-        assertEquals(source.getPassword(), target.getPassword());
+    public void dropsUnsupportedPacketsAndReleasesBuffer() {
+        EmbeddedChannel channel = channel(PacketCodecHandler.INSTANCE);
+        ByteBuf buffer = Unpooled.buffer();
+        PacketCodec.INSTANCE.encode(buffer, new LoginRequestPacket());
+        buffer.setByte(5, 127);
+        assertFalse(channel.writeInbound(buffer));
+        assertNull(channel.readInbound());
+        assertEquals(0, buffer.refCnt());
     }
 }

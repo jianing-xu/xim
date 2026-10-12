@@ -20,6 +20,9 @@ public class Spliter extends LengthFieldBasedFrameDecoder {
     @Override
     protected Object decode(ChannelHandlerContext ctx, ByteBuf in) throws Exception {
         // Block clients that are not use this protocol
+        if (in.readableBytes() < Integer.BYTES) {
+            return null;
+        }
         if (in.getInt(in.readerIndex()) != PacketCodec.MAGIC_NUMBER) {
             ctx.channel().close();
             return null;

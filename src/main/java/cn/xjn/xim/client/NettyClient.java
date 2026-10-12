@@ -2,19 +2,12 @@ package cn.xjn.xim.client;
 
 import cn.xjn.xim.client.console.ConsoleCommandManager;
 import cn.xjn.xim.client.console.LoginConsoleCommand;
-import cn.xjn.xim.client.handler.HeartbeatTimerHandler;
 import cn.xjn.xim.client.handler.IMClientChannelInitializer;
-import cn.xjn.xim.client.handler.IMClientHandler;
-import cn.xjn.xim.codec.PacketCodecHandler;
-import cn.xjn.xim.codec.Spliter;
-import cn.xjn.xim.handler.IMIdleStateHandler;
 import cn.xjn.xim.util.SessionManager;
 import io.netty.bootstrap.Bootstrap;
 import io.netty.channel.Channel;
 import io.netty.channel.ChannelFuture;
-import io.netty.channel.ChannelInitializer;
 import io.netty.channel.nio.NioEventLoopGroup;
-import io.netty.channel.socket.SocketChannel;
 import io.netty.channel.socket.nio.NioSocketChannel;
 import lombok.extern.slf4j.Slf4j;
 
@@ -28,12 +21,14 @@ import java.util.concurrent.TimeUnit;
 @Slf4j
 public class NettyClient {
 
-    private static final int MAX_RETRY = 5;
-    private static final String HOST = "127.0.0.1";
-    private static final int PORT = 8000;
+    private static final int MAX_RETRY = Integer.getInteger("xim.maxRetry", 5);
+    private static final String HOST = System.getProperty("xim.host", "127.0.0.1");
+    private static final int PORT = Integer.getInteger("xim.port", 8000);
 
     public static void main(String[] args) {
         NioEventLoopGroup workerGroup = new NioEventLoopGroup();
+        Runtime.getRuntime().addShutdownHook(new Thread(() ->
+                workerGroup.shutdownGracefully(0, 5, TimeUnit.SECONDS).awaitUninterruptibly(), "xim-client-shutdown"));
 
         Bootstrap bootstrap = new Bootstrap();
         bootstrap

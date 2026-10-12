@@ -7,6 +7,7 @@ import cn.xjn.xim.protocol.response.*;
 import cn.xjn.xim.serialize.Serializer;
 import cn.xjn.xim.serialize.impl.JSONSerializer;
 import io.netty.buffer.ByteBuf;
+import io.netty.handler.codec.CorruptedFrameException;
 
 import java.util.HashMap;
 import java.util.Map;
@@ -19,6 +20,7 @@ public class PacketCodec {
 
     public static final PacketCodec INSTANCE = new PacketCodec();
     public static final int MAGIC_NUMBER = 0x12345678;
+    public static final int HEADER_LENGTH = 11;
 
     private final Map<Byte, Class<? extends Packet>> packetTypeMap;
     private final Map<Byte, Serializer> serializerMap;
@@ -62,16 +64,22 @@ public class PacketCodec {
     }
 
     public Packet decode(ByteBuf byteBuf) {
-        // skip magic number
-        byteBuf.skipBytes(4);
-        // skip version
-        byteBuf.skipBytes(1);
+        if (byteBuf.readableBytes() < HEADER_LENGTH) {
+            throw new CorruptedFrameException("Incomplete packet header");
+        }
+        if (byteBuf.readInt() != MAGIC_NUMBER) {
+            throw new CorruptedFrameException("Invalid magic number");
+        }
+        byte version = byteBuf.readByte();
         // serialize algorithm
         byte serializeAlgorithm = byteBuf.readByte();
         // command
         byte command = byteBuf.readByte();
         // packet length
         int length = byteBuf.readInt();
+        if (length < 0 || length > byteBuf.readableBytes()) {
+            throw new CorruptedFrameException("Invalid packet length: " + length);
+        }
         byte[] content = new byte[length];
         byteBuf.readBytes(content);
 
@@ -79,7 +87,11 @@ public class PacketCodec {
         Serializer serializer = getSerializer(serializeAlgorithm);
 
         if (requestType != null && serializer != null) {
-            return serializer.deserialize(content, requestType);
+            Packet packet = serializer.deserialize(content, requestType);
+            if (packet != null) {
+                packet.setVersion(version);
+            }
+            return packet;
         }
         return null;
     }

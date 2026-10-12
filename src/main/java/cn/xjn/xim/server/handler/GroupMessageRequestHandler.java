@@ -29,6 +29,7 @@ public class GroupMessageRequestHandler extends SimpleChannelInboundHandler<Grou
         GroupMessageResponsePacket responsePacket = new GroupMessageResponsePacket();
         responsePacket.setFromGroupId(toGroupId);
         responsePacket.setFromUser(SessionManager.getSession(channel).getUsername());
+        responsePacket.setFromUserId(SessionManager.getSession(channel).getUserId());
         responsePacket.setMessage(message);
 
         ChannelGroup channelGroup = SessionManager.getChannelGroup(toGroupId);

@@ -2,6 +2,8 @@ package cn.xjn.xim.client.handler;
 
 import cn.xjn.xim.protocol.Packet;
 import cn.xjn.xim.protocol.command.Command;
+import cn.xjn.xim.util.SessionManager;
+import io.netty.channel.ChannelHandler;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.SimpleChannelInboundHandler;
 
@@ -12,6 +14,7 @@ import java.util.Map;
  * @author xjn
  * @date 2023-12-28
  */
+@ChannelHandler.Sharable
 public class IMClientHandler extends SimpleChannelInboundHandler<Packet> {
 
     public static final IMClientHandler INSTANCE = new IMClientHandler();
@@ -33,5 +36,11 @@ public class IMClientHandler extends SimpleChannelInboundHandler<Packet> {
     @Override
     protected void channelRead0(ChannelHandlerContext ctx, Packet packet) throws Exception {
         HANDLER_MAP.get(packet.getCommand()).channelRead(ctx, packet);
+    }
+
+    @Override
+    public void channelInactive(ChannelHandlerContext ctx) throws Exception {
+        SessionManager.unbindSession(ctx.channel());
+        super.channelInactive(ctx);
     }
 }

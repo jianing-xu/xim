@@ -1,43 +1,40 @@
 package cn.xjn.xim.client.handler;
 
 import cn.xjn.xim.protocol.response.LoginResponsePacket;
-import cn.xjn.xim.util.IDUtil;
+import cn.xjn.xim.support.ChannelTestSupport;
+import cn.xjn.xim.util.SessionManager;
 import io.netty.channel.embedded.EmbeddedChannel;
 import org.junit.Test;
 
-import static org.junit.Assert.assertNull;
+import static org.junit.Assert.*;
 
-/**
- * @author xjn
- * @date 2023-12-26
- */
-public class LoginResponseHandlerTest {
-
+public class LoginResponseHandlerTest extends ChannelTestSupport {
     @Test
-    public void test_loginSuccessResponse() {
-        EmbeddedChannel embeddedChannel = new EmbeddedChannel(new LoginResponseHandler());
-        LoginResponsePacket packet = new LoginResponsePacket();
-        String userId = IDUtil.genRandomId();
-        String username = IDUtil.genRandomId();
-        packet.setSuccess(true);
-        packet.setUserId(userId);
-        packet.setUsername(username);
-
-        embeddedChannel.writeInbound(packet);
-        assertNull(embeddedChannel.readOutbound());
+    public void successfulResponseBindsIdentity() {
+        EmbeddedChannel channel = channel(new LoginResponseHandler());
+        LoginResponsePacket packet = response(true);
+        assertFalse(channel.writeInbound(packet));
+        assertTrue(SessionManager.hasLogin(channel));
+        assertEquals(packet.getUserId(), SessionManager.getSession(channel).getUserId());
+        assertEquals("Alice", SessionManager.getSession(channel).getUsername());
+        assertSame(channel, SessionManager.getChannel(packet.getUserId()));
+        assertNull(channel.readOutbound());
     }
 
     @Test
-    public void test_loginFailedResponse() {
-        EmbeddedChannel embeddedChannel = new EmbeddedChannel(new LoginResponseHandler());
-        LoginResponsePacket packet = new LoginResponsePacket();
-        String userId = IDUtil.genRandomId();
-        String username = IDUtil.genRandomId();
-        packet.setSuccess(false);
-        packet.setUsername(username);
-        packet.setReason("Authentication failed");
+    public void failedResponseDoesNotBindSession() {
+        EmbeddedChannel channel = channel(new LoginResponseHandler());
+        assertFalse(channel.writeInbound(response(false)));
+        assertFalse(SessionManager.hasLogin(channel));
+        assertNull(channel.readOutbound());
+    }
 
-        embeddedChannel.writeInbound(packet);
-        assertNull(embeddedChannel.readOutbound());
+    private LoginResponsePacket response(boolean success) {
+        LoginResponsePacket packet = new LoginResponsePacket();
+        packet.setUserId(java.util.UUID.randomUUID().toString());
+        packet.setUsername("Alice");
+        packet.setSuccess(success);
+        packet.setReason("Authentication failed");
+        return packet;
     }
 }

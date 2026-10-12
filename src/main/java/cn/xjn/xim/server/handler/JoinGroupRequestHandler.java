@@ -28,10 +28,15 @@ public class JoinGroupRequestHandler extends SimpleChannelInboundHandler<JoinGro
         String groupId = requestPacket.getGroupId();
         ChannelGroup channelGroup = SessionManager.getChannelGroup(groupId);
         Channel channel = ctx.channel();
-        channelGroup.add(channel);
-
         JoinGroupResponsePacket responsePacket = new JoinGroupResponsePacket();
         responsePacket.setGroupId(groupId);
+        if (channelGroup == null) {
+            responsePacket.setSuccess(false);
+            responsePacket.setReason("Group does not exist");
+            channel.writeAndFlush(responsePacket);
+            return;
+        }
+        channelGroup.add(channel);
         responsePacket.setSuccess(true);
         channel.writeAndFlush(responsePacket);
         log.info("[{}] has joint the group [{}]", SessionManager.getSession(channel).getUsername(), groupId);

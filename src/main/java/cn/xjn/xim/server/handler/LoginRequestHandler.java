@@ -58,16 +58,13 @@ public class LoginRequestHandler extends SimpleChannelInboundHandler<LoginReques
         tempUserMap.put("bbb", "bbb");
         tempUserMap.put("ccc", "ccc");
         String pwd = tempUserMap.get(username);
-        if (password.equals(pwd)) {
-            return true;
-        } else {
-            return false;
-        }
+        return pwd != null && pwd.equals(password);
         /* test code */
     }
 
     @Override
     public void channelInactive(ChannelHandlerContext ctx) throws Exception {
         SessionManager.unbindSession(ctx.channel());
+        super.channelInactive(ctx);
     }
 }
