@@ -8,13 +8,16 @@
     "build": "tsc --noEmit && vite build",
     "typecheck": "tsc --noEmit",
     "preview": "vite preview",
-    "test": "vitest run"
+    "test": "vitest run src",
+    "test:e2e": "playwright test",
+    "e2e:prepare": "npm run build && mvn -f ../backend/pom.xml compile dependency:build-classpath -Dmdep.outputFile=target/classpath.txt"
   },
   "dependencies": {
     "react": "^19.2.0",
     "react-dom": "^19.2.0"
   },
   "devDependencies": {
+    "@playwright/test": "1.61.1",
     "@types/node": "^24.0.0",
     "@types/react": "^19.2.0",
     "@types/react-dom": "^19.2.0",
@@ -23,5 +26,7 @@
     "vite": "^7.1.0",
     "vitest": "^3.2.0"
   },
-  "engines": { "node": "^20.19.0 || >=22.12.0" }
+  "engines": {
+    "node": "^20.19.0 || >=22.12.0"
+  }
 }
