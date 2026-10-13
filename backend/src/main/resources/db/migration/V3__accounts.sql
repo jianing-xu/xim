@@ -1,0 +1,3 @@
+ALTER TABLE xim_users ADD COLUMN password_hash VARCHAR(256);
+ALTER TABLE xim_users ADD COLUMN credential_version BIGINT NOT NULL DEFAULT 0;
+ALTER TABLE xim_users ADD COLUMN demo_account INTEGER NOT NULL DEFAULT 0;

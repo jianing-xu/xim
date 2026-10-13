@@ -1,0 +1,1 @@
+CREATE TABLE xim_conversation_reads (user_id VARCHAR(64) NOT NULL REFERENCES xim_users(user_id), kind VARCHAR(10) NOT NULL CHECK (kind IN ('user','group')), conversation_id VARCHAR(64) NOT NULL, read_seq BIGINT NOT NULL DEFAULT 0 CHECK (read_seq >= 0), PRIMARY KEY(user_id, kind, conversation_id));
