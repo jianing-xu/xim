@@ -23,6 +23,8 @@ public class LogoutRequestHandler extends SimpleChannelInboundHandler<LogoutRequ
 
     @Override
     protected void channelRead0(ChannelHandlerContext ctx, LogoutRequestPacket requestPacket) throws Exception {
+        String credential = ctx.channel().attr(cn.xjn.xim.attribute.Attributes.SESSION_ID).getAndSet(null);
+        if (credential != null) cn.xjn.xim.storage.Storage.get().revokeSession(credential);
         SessionManager.unbindSession(ctx.channel());
         LogoutResponsePacket logoutResponsePacket = new LogoutResponsePacket();
         logoutResponsePacket.setSuccess(true);

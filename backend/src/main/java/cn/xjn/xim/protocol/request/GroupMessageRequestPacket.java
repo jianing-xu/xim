@@ -15,6 +15,9 @@ public class GroupMessageRequestPacket extends Packet {
 
     private String message;
 
+    // Fastjson needs the bean path to retain inherited requestId during TCP decoding.
+    public GroupMessageRequestPacket() {}
+
     public GroupMessageRequestPacket(String toGroupId, String message) {
         this.toGroupId = toGroupId;
         this.message = message;

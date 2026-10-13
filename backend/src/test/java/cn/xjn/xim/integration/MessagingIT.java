@@ -57,7 +57,7 @@ public class MessagingIT {
         peer.send(invalid);
         LoginResponsePacket rejected = peer.receive(LoginResponsePacket.class);
         assertFalse(rejected.isSuccess());
-        assertEquals("Authentication failed", rejected.getReason());
+        assertEquals(cn.xjn.xim.auth.AccountPolicy.INVALID_CREDENTIALS, rejected.getReason());
         assertNull(rejected.getUserId());
         LoginResponsePacket accepted = login(peer, "root");
         assertEquals("root", SessionManager.getSession(SessionManager.getChannel(accepted.getUserId())).getUsername());
@@ -134,7 +134,7 @@ public class MessagingIT {
     }
 
     @Test(timeout = 20000)
-    public void disconnectRemovesSessionAndGroupMembership() throws Exception {
+    public void disconnectRemovesSessionAndKeepsPersistentMembership() throws Exception {
         TcpPeer alice = peer();
         TcpPeer bob = peer();
         LoginResponsePacket a = login(alice, "root");
@@ -145,7 +145,7 @@ public class MessagingIT {
         server.awaitDisconnected(disconnected);
         assertNull(SessionManager.getChannel(b.getUserId()));
         assertFalse(SessionManager.getChannelGroup(id).contains(disconnected));
-        assertEquals(Set.of(a.getUserId()), members(alice, id));
+        assertEquals(Set.of(a.getUserId(), b.getUserId()), members(alice, id));
         alice.send(new MessageRequestPacket(b.getUserId(), "offline"));
         alice.heartbeat();
     }

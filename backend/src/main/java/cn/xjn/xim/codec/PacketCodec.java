@@ -27,6 +27,8 @@ public class PacketCodec {
 
     private PacketCodec() {
         this.packetTypeMap = new HashMap<>();
+        packetTypeMap.put(Command.READ_REQUEST, ReadRequestPacket.class);
+        packetTypeMap.put(Command.READ_RESPONSE, ReadResponsePacket.class);
         packetTypeMap.put(Command.LOGIN_REQUEST, LoginRequestPacket.class);
         packetTypeMap.put(Command.LOGIN_RESPONSE, LoginResponsePacket.class);
         packetTypeMap.put(Command.MESSAGE_REQUEST, MessageRequestPacket.class);
@@ -45,6 +47,16 @@ public class PacketCodec {
         packetTypeMap.put(Command.GROUP_MESSAGE_RESPONSE, GroupMessageResponsePacket.class);
         packetTypeMap.put(Command.HEARTBEAT_REQUEST, HeartbeatRequestPacket.class);
         packetTypeMap.put(Command.HEARTBEAT_RESPONSE, HeartbeatResponsePacket.class);
+        packetTypeMap.put(Command.HISTORY_REQUEST, HistoryRequestPacket.class);
+        packetTypeMap.put(Command.CONVERSATIONS_REQUEST, ConversationsRequestPacket.class);
+        packetTypeMap.put(Command.HISTORY_RESPONSE, HistoryResponsePacket.class);
+        packetTypeMap.put(Command.CONVERSATIONS_RESPONSE, ConversationsResponsePacket.class);
+        packetTypeMap.put(Command.ERROR_RESPONSE, ErrorResponsePacket.class);
+        packetTypeMap.put(Command.SENT_RESPONSE, SentResponsePacket.class);
+        packetTypeMap.put(Command.REGISTER_REQUEST, RegisterRequestPacket.class);
+        packetTypeMap.put(Command.REGISTER_RESPONSE, RegisterResponsePacket.class);
+        packetTypeMap.put(Command.CHANGE_PASSWORD_REQUEST, ChangePasswordRequestPacket.class);
+        packetTypeMap.put(Command.CHANGE_PASSWORD_RESPONSE, ChangePasswordResponsePacket.class);
         this.serializerMap = new HashMap<>();
         JSONSerializer jsonSerializer = new JSONSerializer();
         serializerMap.put(jsonSerializer.getSerializerAlgorithm(), jsonSerializer);
@@ -87,7 +99,12 @@ public class PacketCodec {
         Serializer serializer = getSerializer(serializeAlgorithm);
 
         if (requestType != null && serializer != null) {
-            Packet packet = serializer.deserialize(content, requestType);
+            Packet packet;
+            try { packet = serializer.deserialize(content, requestType); }
+            catch (RuntimeException invalid) {
+                // Parser exception messages can contain the original JSON, including passwords.
+                throw new CorruptedFrameException("Invalid packet payload");
+            }
             if (packet != null) {
                 packet.setVersion(version);
             }

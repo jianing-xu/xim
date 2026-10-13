@@ -99,7 +99,7 @@ public class ApplicationLifecycleIT {
             client.awaitLog("successfully connected", 10);
             client.sendConsole("root root");
             String output = client.awaitLog("login successful", 10);
-            Matcher user = Pattern.compile("\\[([0-9a-f]{8}):root] login successful").matcher(output);
+            Matcher user = Pattern.compile("\\[([0-9a-f-]{36}):root] login successful").matcher(output);
             assertTrue("Client login log did not include identity: " + output, user.find());
             Channel serverChannel = SessionManager.getChannel(user.group(1));
             assertNotNull(serverChannel);

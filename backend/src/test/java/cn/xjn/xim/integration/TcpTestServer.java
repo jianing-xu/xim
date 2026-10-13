@@ -35,6 +35,7 @@ final class TcpTestServer implements AutoCloseable {
     private final Queue<Throwable> errors = new ConcurrentLinkedQueue<>();
     private final ConcurrentMap<Channel, CompletableFuture<Void>> inactiveEvents = new ConcurrentHashMap<>();
     private final BlockingQueue<Integer> inboundBytes = new LinkedBlockingQueue<>();
+    private final Queue<CompletableFuture<Void>> destroyedPipelines = new ConcurrentLinkedQueue<>();
     private final AtomicInteger heartbeatCount = new AtomicInteger();
     private Channel listener;
 
@@ -44,12 +45,16 @@ final class TcpTestServer implements AutoCloseable {
 
     TcpTestServer(int port) throws Exception {
         try {
+            // Match production startup: migration/demo password hashing finishes before accepting clients.
+            cn.xjn.xim.storage.Storage.get();
             listener = new ServerBootstrap().group(boss, worker).channel(NioServerSocketChannel.class)
                     .childOption(ChannelOption.TCP_NODELAY, true)
                     .childHandler(new IMServerChannelInitializer() {
                         @Override
                         protected void initChannel(NioSocketChannel channel) throws Exception {
                             connections.add(channel);
+                            CompletableFuture<Void> destroyed = new CompletableFuture<>();
+                            destroyedPipelines.add(destroyed);
                             CompletableFuture<Void> inactive = new CompletableFuture<>();
                             inactiveEvents.put(channel, inactive);
                             super.initChannel(channel);
@@ -64,6 +69,7 @@ final class TcpTestServer implements AutoCloseable {
                                         }
                                     });
                             channel.pipeline().addFirst(new ChannelInboundHandlerAdapter() {
+                                @Override public void handlerRemoved(ChannelHandlerContext ctx) { destroyed.complete(null); }
                                 @Override
                                 public void channelRead(ChannelHandlerContext ctx, Object message) throws Exception {
                                     if (message instanceof ByteBuf bytes) {
@@ -124,6 +130,12 @@ final class TcpTestServer implements AutoCloseable {
                 assertTrue("Listener failed to close", listener.close().awaitUninterruptibly(5000));
             }
             assertTrue("Accepted connections failed to close", connections.close().awaitUninterruptibly(5000));
+            // Close futures precede off-executor pipeline teardown. Keep socket event loops alive until all
+            // storage handlers are removed, or their callback to the socket loop can kill the shared executor.
+            for (var destroyed : destroyedPipelines) {
+                try { destroyed.get(5, TimeUnit.SECONDS); }
+                catch (Exception failure) { throw new AssertionError("Pipeline teardown did not finish", failure); }
+            }
         } finally {
             var workerStopped = worker.shutdownGracefully(0, 5, TimeUnit.SECONDS);
             var bossStopped = boss.shutdownGracefully(0, 5, TimeUnit.SECONDS);

@@ -16,6 +16,9 @@ public class MessageResponsePacket extends Packet {
     private String fromUsername;
 
     private String message;
+    private String id;
+    private long time;
+    private long sequence;
 
     public MessageResponsePacket(String fromUserId, String fromUsername, String message) {
         this.fromUserId = fromUserId;

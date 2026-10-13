@@ -26,7 +26,9 @@ public class QuitGroupRequestHandler extends SimpleChannelInboundHandler<QuitGro
         Channel channel = ctx.channel();
         String groupId = requestPacket.getGroupId();
         ChannelGroup channelGroup = SessionManager.getChannelGroup(groupId);
+        if (channelGroup == null) throw new IllegalArgumentException("群组不存在");
         if (channelGroup != null) {
+            cn.xjn.xim.storage.Storage.get().quit(groupId, SessionManager.getSession(channel).getUserId());
             channelGroup.remove(channel);
             QuitGroupResponsePacket responsePacket = new QuitGroupResponsePacket();
             responsePacket.setGroupId(groupId);

@@ -18,6 +18,9 @@ public class LoginResponsePacket extends Packet {
     private boolean success;
 
     private String reason;
+    private String sessionTicket;
+    private String connectionId;
+    private long expiresAt;
 
     @Override
     public Byte getCommand() {

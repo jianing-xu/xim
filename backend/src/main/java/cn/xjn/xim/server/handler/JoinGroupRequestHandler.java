@@ -36,6 +36,7 @@ public class JoinGroupRequestHandler extends SimpleChannelInboundHandler<JoinGro
             channel.writeAndFlush(responsePacket);
             return;
         }
+        cn.xjn.xim.storage.Storage.get().join(groupId, SessionManager.getSession(channel).getUserId());
         channelGroup.add(channel);
         responsePacket.setSuccess(true);
         channel.writeAndFlush(responsePacket);

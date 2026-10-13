@@ -26,13 +26,18 @@ public class GroupMessageRequestHandler extends SimpleChannelInboundHandler<Grou
         Channel channel = ctx.channel();
         String toGroupId = requestPacket.getToGroupId();
         String message = requestPacket.getMessage();
+        var result = cn.xjn.xim.storage.Storage.get().save(SessionManager.getSession(channel), null, toGroupId, message, requestPacket.getRequestId());
+        var saved = result.message();
         GroupMessageResponsePacket responsePacket = new GroupMessageResponsePacket();
         responsePacket.setFromGroupId(toGroupId);
         responsePacket.setFromUser(SessionManager.getSession(channel).getUsername());
         responsePacket.setFromUserId(SessionManager.getSession(channel).getUserId());
         responsePacket.setMessage(message);
+        responsePacket.setRequestId(saved.getClientMessageId());
+        responsePacket.setSequence(saved.getSequence()); responsePacket.setId(saved.getId()); responsePacket.setTime(saved.getTime());
 
         ChannelGroup channelGroup = SessionManager.getChannelGroup(toGroupId);
-        channelGroup.writeAndFlush(responsePacket);
+        if (result.inserted() && channelGroup != null) channelGroup.writeAndFlush(responsePacket);
+        HistoryRequestHandler.sent(ctx, requestPacket, saved);
     }
 }

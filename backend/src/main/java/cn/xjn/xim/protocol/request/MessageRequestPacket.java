@@ -15,6 +15,9 @@ public class MessageRequestPacket extends Packet {
 
     private String message;
 
+    // Fastjson needs the bean path to retain inherited requestId during TCP decoding.
+    public MessageRequestPacket() {}
+
     public MessageRequestPacket(String toUserId, String message) {
         this.toUserId = toUserId;
         this.message = message;

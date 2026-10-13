@@ -29,6 +29,8 @@ public class WebChatIT {
     private NioEventLoopGroup boss;
     private NioEventLoopGroup worker;
     private Channel listener;
+    private final java.util.Queue<CompletableFuture<Void>> destroyedPipelines = new ConcurrentLinkedQueue<>();
+    private final io.netty.channel.group.ChannelGroup connections = new io.netty.channel.group.DefaultChannelGroup(io.netty.util.concurrent.GlobalEventExecutor.INSTANCE);
     private HttpClient http;
     private URI base;
     private final List<Peer> peers = new ArrayList<>();
@@ -39,7 +41,16 @@ public class WebChatIT {
         boss = new NioEventLoopGroup(1);
         worker = new NioEventLoopGroup(1);
         listener = new ServerBootstrap().group(boss, worker).channel(NioServerSocketChannel.class)
-                .childHandler(new WebServerChannelInitializer()).bind("127.0.0.1", 0).sync().channel();
+                .childHandler(new WebServerChannelInitializer() {
+                    @Override protected void initChannel(io.netty.channel.socket.nio.NioSocketChannel channel) {
+                        connections.add(channel);
+                        var destroyed = new CompletableFuture<Void>(); destroyedPipelines.add(destroyed);
+                        super.initChannel(channel);
+                        channel.pipeline().addFirst(new io.netty.channel.ChannelInboundHandlerAdapter() {
+                            @Override public void handlerRemoved(io.netty.channel.ChannelHandlerContext ctx) { destroyed.complete(null); }
+                        });
+                    }
+                }).bind("127.0.0.1", 0).sync().channel();
         base = URI.create("http://127.0.0.1:" + ((InetSocketAddress) listener.localAddress()).getPort());
         http = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(3)).build();
     }
@@ -48,6 +59,8 @@ public class WebChatIT {
     public void stop() throws Exception {
         for (Peer peer : peers) peer.close();
         if (listener != null) listener.close().sync();
+        connections.close().sync();
+        for (var destroyed : destroyedPipelines) destroyed.get(5, TimeUnit.SECONDS);
         if (worker != null) worker.shutdownGracefully(0, 5, TimeUnit.SECONDS).sync();
         if (boss != null) boss.shutdownGracefully(0, 5, TimeUnit.SECONDS).sync();
         groups.forEach(SessionManager::unbindChannelGroup);
@@ -83,12 +96,13 @@ public class WebChatIT {
         String aId = a.login("root"); String bId = b.login("aaa");
         a.send("users");
         assertTrue(a.receive("users").getJSONArray("users").stream().map(Object::toString).anyMatch(value -> value.contains(bId)));
-        a.send("message", "toUserId", bId, "message", "你好 🌍\n<script>alert(1)</script>", "requestId", "m1", "fromUserId", "forged");
+        String clientMessageId = java.util.UUID.randomUUID().toString();
+        a.send("message", "toUserId", bId, "message", "你好 🌍\n<script>alert(1)</script>", "requestId", clientMessageId, "fromUserId", "forged");
         JSONObject incoming = b.receive("message");
         assertEquals(aId, incoming.getString("fromUserId"));
         assertEquals("root", incoming.getString("fromUsername"));
         assertEquals("你好 🌍\n<script>alert(1)</script>", incoming.getString("message"));
-        assertEquals("m1", a.receive("sent").getString("requestId"));
+        assertEquals(clientMessageId, a.receive("sent").getString("requestId"));
         a.send("message", "toUserId", "offline", "message", "未发送", "requestId", "m2");
         assertEquals("m2", a.receive("error").getString("requestId"));
         a.send("message", "toUserId", bId, "message", " "); assertTrue(a.receive("error").getString("reason").contains("不能为空"));
@@ -125,7 +139,7 @@ public class WebChatIT {
         c.send("joinGroup", "groupId", "missing"); assertFalse(c.receive("joinGroup").getBooleanValue("success"));
         c.send("joinGroup", "groupId", group); assertTrue(c.receive("joinGroup").getBooleanValue("success"));
         a.send("members", "groupId", group); assertEquals(3, a.receive("members").getJSONArray("sessions").size());
-        a.send("groupMessage", "groupId", group, "message", "群聊 🌍", "requestId", "g1");
+        a.send("groupMessage", "groupId", group, "message", "群聊 🌍", "requestId", java.util.UUID.randomUUID().toString());
         for (Peer member : List.of(a, b, c)) {
             JSONObject message = member.receive("groupMessage");
             assertEquals("群聊 🌍", message.getString("message")); assertEquals(aId, message.getString("fromUserId"));
@@ -134,7 +148,7 @@ public class WebChatIT {
         c.send("quitGroup", "groupId", group); assertTrue(c.receive("quitGroup").getBooleanValue("success"));
         c.send("groupMessage", "groupId", group, "message", "after quit"); c.receive("error");
         b.close(); awaitOffline(bId);
-        a.send("members", "groupId", group); assertEquals(1, a.receive("members").getJSONArray("sessions").size());
+        a.send("members", "groupId", group); assertEquals(2, a.receive("members").getJSONArray("sessions").size());
         a.send("members", "groupId", "missing"); a.receive("error");
     }
 
@@ -143,7 +157,7 @@ public class WebChatIT {
         try (TcpTestServer tcp = new TcpTestServer(); TcpPeer terminal = new TcpPeer(tcp.port())) {
             Peer browser = peer(); String browserId = browser.login("root");
             String terminalId = terminal.login("aaa").getUserId();
-            browser.send("message", "toUserId", terminalId, "message", "web → TCP", "requestId", "mix");
+            browser.send("message", "toUserId", terminalId, "message", "web → TCP", "requestId", java.util.UUID.randomUUID().toString());
             assertEquals("web → TCP", terminal.receive(MessageResponsePacket.class).getMessage()); browser.receive("sent");
             terminal.send(new MessageRequestPacket(browserId, "TCP → web")); assertEquals("TCP → web", browser.receive("message").getString("message"));
             browser.send("createGroup", "userIds", List.of(terminalId));
@@ -174,6 +188,67 @@ public class WebChatIT {
             browser.socket = http.newWebSocketBuilder().header("Origin", origin)
                     .buildAsync(URI.create(base.toString().replace("http:", "ws:") + "/ws"), browser).join();
             browser.login("root");
+            browser.close(); awaitOffline(browser.userId);
+        }
+    }
+
+    @Test(timeout = 25000)
+    public void realAccountsRegisterLoginAndChangePasswordsAcrossBothTransports() throws Exception {
+        String username = "wire_" + java.util.UUID.randomUUID().toString().substring(0, 8);
+        Peer browser = peer();
+        browser.send("register", "username", username, "password", "first-private-password", "requestId", "reg");
+        JSONObject created = browser.receive("register");
+        assertTrue(created.getBooleanValue("success")); assertEquals("reg", created.getString("requestId"));
+        assertFalse(created.toJSONString().contains("first-private-password"));
+        browser.send("register", "username", username, "password", "attempted-claim", "requestId", "duplicate");
+        assertEquals("账号已存在，请选择其他账号", browser.receive("register").getString("reason"));
+        browser.send("register", "username", "bad input", "password", "private-password");
+        assertFalse(browser.receive("register").getBooleanValue("success"));
+        browser.send("login", "username", username, "password", "first-private-password");
+        JSONObject logged = browser.receive("login"); assertTrue(logged.getBooleanValue("success"));
+        String id = logged.getString("userId"); browser.userId = id;
+        long version = cn.xjn.xim.storage.Storage.get().credentialVersion(id);
+        try (TcpTestServer tcp = new TcpTestServer(); TcpPeer terminal = new TcpPeer(tcp.port())) {
+            var login = new LoginRequestPacket(); login.setUsername(username); login.setPassword("first-private-password");
+            terminal.send(login); assertEquals(id, terminal.receive(LoginResponsePacket.class).getUserId());
+            var change = new ChangePasswordRequestPacket(); change.setCurrentPassword("first-private-password"); change.setNewPassword("second-private-password"); change.setRequestId("tcp-change");
+            terminal.send(change); var changed = terminal.receive(ChangePasswordResponsePacket.class);
+            assertTrue(changed.isSuccess()); assertEquals("tcp-change", changed.getRequestId()); terminal.awaitClosed();
+        }
+        awaitOffline(id); assertEquals(version + 1, cn.xjn.xim.storage.Storage.get().credentialVersion(id));
+        Peer fresh = peer();
+        fresh.send("login", "username", username, "password", "first-private-password");
+        JSONObject rejected = fresh.receive("login"); assertFalse(rejected.getBooleanValue("success"));
+        assertEquals(cn.xjn.xim.auth.AccountPolicy.INVALID_CREDENTIALS, rejected.getString("reason"));
+        assertFalse(rejected.toJSONString().contains("first-private-password"));
+        fresh.send("login", "username", username, "password", "second-private-password");
+        JSONObject relogged = fresh.receive("login"); assertTrue(relogged.getBooleanValue("success")); assertEquals(id, relogged.getString("userId")); fresh.userId = id;
+        fresh.send("changePassword", "currentPassword", "second-private-password", "newPassword", "third-private-password", "requestId", "web-change");
+        JSONObject changed = fresh.receive("changePassword"); assertTrue(changed.getBooleanValue("success")); assertEquals("web-change", changed.getString("requestId"));
+        awaitOffline(id);
+        assertNull(cn.xjn.xim.storage.Storage.get().authenticate(username, "second-private-password"));
+        assertEquals(id, cn.xjn.xim.storage.Storage.get().authenticate(username, "third-private-password").getUserId());
+    }
+
+    @Test(timeout = 25000)
+    public void loginAttemptsShareLimitsAcrossTcpAndWebSocket() throws Exception {
+        String username = "limit_" + java.util.UUID.randomUUID().toString().substring(0, 8);
+        cn.xjn.xim.storage.Storage.get().register(username, "correct-password");
+        Peer browser = peer();
+        try (TcpTestServer tcp = new TcpTestServer(); TcpPeer terminal = new TcpPeer(tcp.port())) {
+            for (int i = 0; i < 5; i++) {
+                if (i % 2 == 0) {
+                    browser.send("login", "username", username, "password", "wrong-password");
+                    assertEquals(cn.xjn.xim.auth.AccountPolicy.INVALID_CREDENTIALS, browser.receive("login").getString("reason"));
+                } else {
+                    var login = new LoginRequestPacket(); login.setUsername(username); login.setPassword("wrong-password"); terminal.send(login);
+                    assertEquals(cn.xjn.xim.auth.AccountPolicy.INVALID_CREDENTIALS, terminal.receive(LoginResponsePacket.class).getReason());
+                }
+            }
+            browser.send("login", "username", username, "password", "correct-password");
+            assertEquals(cn.xjn.xim.auth.AccountPolicy.LIMITED, browser.receive("login").getString("reason"));
+            var login = new LoginRequestPacket(); login.setUsername(username); login.setPassword("correct-password"); terminal.send(login);
+            assertEquals(cn.xjn.xim.auth.AccountPolicy.LIMITED, terminal.receive(LoginResponsePacket.class).getReason());
         }
     }
 
@@ -219,7 +294,7 @@ public class WebChatIT {
             userId = response.getString("userId"); return userId;
         }
         @Override public void close() {
-            if (socket != null && !closed) { socket.sendClose(WebSocket.NORMAL_CLOSURE, "done").join(); closed = true; }
+            if (socket != null && !closed && !socket.isOutputClosed()) { socket.sendClose(WebSocket.NORMAL_CLOSURE, "done").join(); closed = true; }
         }
     }
 }

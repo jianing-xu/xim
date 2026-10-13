@@ -23,7 +23,7 @@ public class LoginRequestHandlerTest extends ChannelTestSupport {
             LoginResponsePacket response = channel.readOutbound();
             assertTrue(response.isSuccess());
             assertEquals(username, response.getUsername());
-            assertTrue(response.getUserId().matches("[0-9a-f]{8}"));
+            assertEquals(cn.xjn.xim.storage.Storage.get().user(username).getUserId(), response.getUserId());
             assertNull(response.getReason());
             assertEquals(new Session(response.getUserId(), username), SessionManager.getSession(channel));
             assertSame(channel, SessionManager.getChannel(response.getUserId()));
@@ -39,7 +39,7 @@ public class LoginRequestHandlerTest extends ChannelTestSupport {
             channel.writeInbound(request(credential[0], credential[1]));
             LoginResponsePacket response = channel.readOutbound();
             assertFalse(response.isSuccess());
-            assertEquals("Authentication failed", response.getReason());
+            assertEquals(cn.xjn.xim.auth.AccountPolicy.INVALID_CREDENTIALS, response.getReason());
             assertNull(response.getUserId());
             assertFalse(SessionManager.hasLogin(channel));
         }

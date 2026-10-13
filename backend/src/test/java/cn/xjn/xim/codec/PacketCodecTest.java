@@ -57,7 +57,11 @@ public class PacketCodecTest {
         groupMessage.setFromUser("用户");
         groupMessage.setFromGroupId("group-1");
         groupMessage.setMessage("你好 🌍");
-        return List.of(login, loginResponse,
+        var register = new RegisterRequestPacket(); register.setUsername("new_user"); register.setPassword("register-secret");
+        var registered = new RegisterResponsePacket(); registered.setSuccess(true);
+        var change = new ChangePasswordRequestPacket(); change.setCurrentPassword("old-secret"); change.setNewPassword("new-secret");
+        var changed = new ChangePasswordResponsePacket(); changed.setSuccess(false); changed.setReason("safe reason");
+        return List.of(register, registered, change, changed, login, loginResponse,
                 new MessageRequestPacket("user-2", "你好 🌍"),
                 new MessageResponsePacket("user-1", "用户", "你好 🌍"),
                 new LogoutRequestPacket(), logout, create, created, list, listed, join, joined,
@@ -73,6 +77,7 @@ public class PacketCodecTest {
 
     @Test
     public void roundTripsEveryPacketTypeAndPayload() {
+        source.setRequestId("logical-message-id");
         ByteBuf buffer = Unpooled.buffer();
         try {
             PacketCodec.INSTANCE.encode(buffer, source);
@@ -80,6 +85,7 @@ public class PacketCodecTest {
             assertEquals(source.getClass(), decoded.getClass());
             assertEquals(source.getVersion(), decoded.getVersion());
             assertEquals(source.getCommand(), decoded.getCommand());
+            assertEquals(source.getRequestId(), decoded.getRequestId());
             assertArrayEquals(Serializer.DEFAULT.serialize(source), Serializer.DEFAULT.serialize(decoded));
             assertFalse(buffer.isReadable());
         } finally {

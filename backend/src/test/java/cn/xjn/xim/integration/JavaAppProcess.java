@@ -24,6 +24,17 @@ final class JavaAppProcess implements AutoCloseable {
     }
 
     JavaAppProcess(Class<?> entrypoint, int port, int maxRetry, int webPort) throws IOException {
+        this(entrypoint, port, maxRetry, webPort, null);
+    }
+
+    JavaAppProcess(Class<?> entrypoint, int port, int maxRetry, int webPort, Path database) throws IOException {
+        this(entrypoint, port, maxRetry, webPort, database, true);
+    }
+
+    JavaAppProcess(Class<?> entrypoint, int port, int maxRetry, int webPort, Path database, Boolean demoEnabled) throws IOException {
+        this(entrypoint,port,maxRetry,webPort,database,demoEnabled,new String[0]);
+    }
+    JavaAppProcess(Class<?> entrypoint, int port, int maxRetry, int webPort, Path database, Boolean demoEnabled, String... options) throws IOException {
         Path logs = Path.of("target", "integration-logs").toAbsolutePath();
         Files.createDirectories(logs);
         String processId = UUID.randomUUID().toString();
@@ -34,13 +45,19 @@ final class JavaAppProcess implements AutoCloseable {
                 "-Dio.netty.eventLoopThreads=2", "-Dlogback.configurationFile=integration-logback.xml",
                 "-cp", System.getProperty("surefire.test.class.path", System.getProperty("java.class.path")),
                 entrypoint.getName()));
+        command.addAll(1, List.of(options));
+        command.add(1, "-Dxim.db.type=sqlite");
+        if (demoEnabled != null) command.add(1, "-Dxim.auth.demo=" + demoEnabled);
+        command.add(1, "-Dxim.db.sqlite.path=" + (database == null ? logs.resolve(processId + ".db") : database));
         // Each subprocess writes its own execution data; verify merges it with the test JVM data.
         ManagementFactory.getRuntimeMXBean().getInputArguments().stream()
                 .filter(argument -> argument.startsWith("-javaagent:") && argument.contains("org.jacoco.agent"))
                 .findFirst().ifPresent(agent -> command.add(1, (agent.contains("=") ? agent.substring(0, agent.indexOf('=')) : agent)
                         + "=destfile=" + logs.getParent().resolve("jacoco-process-" + processId + ".exec")
                         + ",append=false"));
-        process = new ProcessBuilder(command).redirectErrorStream(true).redirectOutput(logFile.toFile()).start();
+        ProcessBuilder builder = new ProcessBuilder(command).redirectErrorStream(true).redirectOutput(logFile.toFile());
+        if (demoEnabled == null) builder.environment().remove("XIM_AUTH_DEMO");
+        process = builder.start();
         input = new OutputStreamWriter(process.getOutputStream(), StandardCharsets.UTF_8);
     }
 

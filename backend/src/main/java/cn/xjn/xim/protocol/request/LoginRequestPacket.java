@@ -13,6 +13,7 @@ public class LoginRequestPacket extends Packet {
 
     private String username;
 
+    @lombok.ToString.Exclude
     private String password;
 
     @Override

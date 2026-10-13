@@ -30,12 +30,8 @@ public class ListGroupMemberRequestHandler extends SimpleChannelInboundHandler<L
     @Override
     protected void channelRead0(ChannelHandlerContext ctx, ListGroupMemberRequestPacket requestPacket) throws Exception {
         String groupId = requestPacket.getGroupId();
-        ChannelGroup channelGroup = SessionManager.getChannelGroup(groupId);
-        List<Session> sessions = new ArrayList<>();
-        for (Channel memberChannel : channelGroup) {
-            Session session = SessionManager.getSession(memberChannel);
-            sessions.add(session);
-        }
+        cn.xjn.xim.storage.Storage.get().requireMember(groupId, SessionManager.getSession(ctx.channel()).getUserId());
+        List<Session> sessions = cn.xjn.xim.storage.Storage.get().members(groupId);
 
         ListGroupMemberResponsePacket responsePacket = new ListGroupMemberResponsePacket();
         responsePacket.setGroupId(groupId);

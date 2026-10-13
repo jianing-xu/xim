@@ -35,7 +35,13 @@ public class IMClientHandler extends SimpleChannelInboundHandler<Packet> {
 
     @Override
     protected void channelRead0(ChannelHandlerContext ctx, Packet packet) throws Exception {
-        HANDLER_MAP.get(packet.getCommand()).channelRead(ctx, packet);
+        var handler = HANDLER_MAP.get(packet.getCommand());
+        if (handler != null) handler.channelRead(ctx, packet);
+        else if (packet instanceof cn.xjn.xim.protocol.response.ErrorResponsePacket error) {
+            System.out.println(error.getReason());
+        } else {
+            System.out.println(com.alibaba.fastjson.JSON.toJSONString(packet));
+        }
     }
 
     @Override

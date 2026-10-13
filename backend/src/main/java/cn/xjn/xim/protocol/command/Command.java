@@ -6,6 +6,21 @@ package cn.xjn.xim.protocol.command;
  */
 public interface Command {
 
+    Byte READ_REQUEST = 29;
+    Byte READ_RESPONSE = 30;
+
+    Byte REGISTER_REQUEST = 25;
+    Byte REGISTER_RESPONSE = 26;
+    Byte CHANGE_PASSWORD_REQUEST = 27;
+    Byte CHANGE_PASSWORD_RESPONSE = 28;
+
+    Byte HISTORY_REQUEST = 19;
+    Byte HISTORY_RESPONSE = 20;
+    Byte CONVERSATIONS_REQUEST = 21;
+    Byte CONVERSATIONS_RESPONSE = 22;
+    Byte ERROR_RESPONSE = 23;
+    Byte SENT_RESPONSE = 24;
+
     Byte LOGIN_REQUEST = 1;
 
     Byte LOGIN_RESPONSE = 2;

@@ -29,10 +29,10 @@ public class MessageRequestHandlerTest extends ChannelTestSupport {
 
     @Test
     public void ignoresOfflineRecipientWithoutClosingSender() {
-        EmbeddedChannel sender = channel(MessageRequestHandler.INSTANCE);
+        EmbeddedChannel sender = channel(IMServerHandler.INSTANCE);
         login(sender, "Alice");
         assertFalse(sender.writeInbound(new MessageRequestPacket("missing", "hello")));
         assertTrue(sender.isActive());
-        assertNull(sender.readOutbound());
+        assertEquals("收件人无效", ((cn.xjn.xim.protocol.response.ErrorResponsePacket) sender.readOutbound()).getReason());
     }
 }

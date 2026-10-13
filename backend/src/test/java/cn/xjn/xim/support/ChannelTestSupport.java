@@ -24,7 +24,7 @@ public abstract class ChannelTestSupport {
     }
 
     protected Session login(EmbeddedChannel channel, String username) {
-        Session session = new Session(UUID.randomUUID().toString(), username);
+        Session session = cn.xjn.xim.storage.Storage.get().user(username);
         SessionManager.bindSession(session, channel);
         return session;
     }
@@ -35,6 +35,7 @@ public abstract class ChannelTestSupport {
         for (EmbeddedChannel member : members) {
             group.add(member);
         }
+        cn.xjn.xim.storage.Storage.get().createGroup(groupId, java.util.Arrays.stream(members).map(SessionManager::getSession).map(Session::getUserId).toList());
         SessionManager.bindChannelGroup(groupId, group);
         trackGroup(groupId);
         return groupId;

@@ -11,6 +11,16 @@ import org.junit.Test;
 import static org.junit.Assert.*;
 
 public class PacketCodecValidationTest {
+    @Test public void malformedCredentialsDoNotLeakIntoParserExceptions() {
+        byte[] payload = "{\"password\":\"private-secret\", broken".getBytes(java.nio.charset.StandardCharsets.UTF_8);
+        ByteBuf buffer = header(PacketCodec.MAGIC_NUMBER, payload.length);
+        buffer.setByte(6, cn.xjn.xim.protocol.command.Command.LOGIN_REQUEST);
+        buffer.writeBytes(payload);
+        try {
+            var failure = assertThrows(CorruptedFrameException.class, () -> PacketCodec.INSTANCE.decode(buffer));
+            assertEquals("Invalid packet payload", failure.getMessage()); assertNull(failure.getCause());
+        } finally { buffer.release(); }
+    }
     @Test
     public void rejectsIncompleteHeader() {
         ByteBuf buffer = Unpooled.buffer().writeInt(PacketCodec.MAGIC_NUMBER);

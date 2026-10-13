@@ -22,6 +22,7 @@ public class IMServerHandler extends SimpleChannelInboundHandler<Packet> {
     private final Map<Byte, SimpleChannelInboundHandler<? extends Packet>> HANDLER_MAP = new HashMap<>();
 
     private IMServerHandler() {
+        HANDLER_MAP.put(Command.HISTORY_REQUEST, HistoryRequestHandler.INSTANCE);
         HANDLER_MAP.put(Command.MESSAGE_REQUEST, MessageRequestHandler.INSTANCE);
         HANDLER_MAP.put(Command.CREATE_GROUP_REQUEST, CreateGroupRequestHandler.INSTANCE);
         HANDLER_MAP.put(Command.JOIN_GROUP_REQUEST, JoinGroupRequestHandler.INSTANCE);
@@ -33,6 +34,22 @@ public class IMServerHandler extends SimpleChannelInboundHandler<Packet> {
 
     @Override
     protected void channelRead0(ChannelHandlerContext ctx, Packet packet) throws Exception {
-        HANDLER_MAP.get(packet.getCommand()).channelRead(ctx, packet);
+        try {
+            if (!cn.xjn.xim.util.SessionManager.hasLogin(ctx.channel())) throw new IllegalArgumentException("请先登录");
+            if (packet instanceof cn.xjn.xim.protocol.request.ConversationsRequestPacket) {
+                HistoryRequestHandler.conversations(ctx, packet); return;
+            }
+            if (packet instanceof cn.xjn.xim.protocol.request.ReadRequestPacket read) {
+                HistoryRequestHandler.read(ctx, read); return;
+            }
+            var handler = HANDLER_MAP.get(packet.getCommand());
+            if (handler == null) throw new IllegalArgumentException("不支持的操作");
+            handler.channelRead(ctx, packet);
+        } catch (Exception failure) {
+            var response = new cn.xjn.xim.protocol.response.ErrorResponsePacket();
+            response.setRequestId(packet.getRequestId());
+            response.setReason(failure instanceof IllegalArgumentException ? failure.getMessage() : "存储操作失败，请稍后重试");
+            ctx.writeAndFlush(response);
+        }
     }
 }

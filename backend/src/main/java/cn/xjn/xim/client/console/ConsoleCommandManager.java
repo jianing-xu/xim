@@ -18,6 +18,13 @@ public class ConsoleCommandManager implements ConsoleCommand {
     private static final Map<String, ConsoleCommand> consoleCommandMap = new HashMap<>();
 
     public ConsoleCommandManager() {
+        consoleCommandMap.put("conversations", (scanner, channel) -> channel.writeAndFlush(new cn.xjn.xim.protocol.request.ConversationsRequestPacket()));
+        consoleCommandMap.put("history", (scanner, channel) -> {
+            var packet = new cn.xjn.xim.protocol.request.HistoryRequestPacket();
+            packet.setKind(scanner.next()); packet.setId(scanner.next());
+            String before = scanner.next(); if (!before.equals("latest")) packet.setBefore(before);
+            channel.writeAndFlush(packet);
+        });
         consoleCommandMap.put("sendToUser", new SendToUserConsoleCommand());
         consoleCommandMap.put("logout", new LogoutConsoleCommand());
         consoleCommandMap.put("createGroup", new CreateGroupConsoleCommand());

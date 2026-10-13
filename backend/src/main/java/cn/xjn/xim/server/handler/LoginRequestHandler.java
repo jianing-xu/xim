@@ -3,15 +3,14 @@ package cn.xjn.xim.server.handler;
 import cn.xjn.xim.protocol.request.LoginRequestPacket;
 import cn.xjn.xim.protocol.response.LoginResponsePacket;
 import cn.xjn.xim.session.Session;
-import cn.xjn.xim.util.IDUtil;
 import cn.xjn.xim.util.SessionManager;
 import io.netty.channel.ChannelHandler;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.SimpleChannelInboundHandler;
 import lombok.extern.slf4j.Slf4j;
 
-import java.util.HashMap;
-import java.util.Map;
+import cn.xjn.xim.auth.AccountPolicy;
+import cn.xjn.xim.auth.AuthAttempts;
 
 /**
  * @author xjn
@@ -30,36 +29,44 @@ public class LoginRequestHandler extends SimpleChannelInboundHandler<LoginReques
     protected void channelRead0(ChannelHandlerContext ctx, LoginRequestPacket requestPacket) throws Exception {
         LoginResponsePacket responsePacket = new LoginResponsePacket();
         String username = requestPacket.getUsername();
-        responsePacket.setUsername(username);
-
-        if (auth(requestPacket)) {
-            responsePacket.setSuccess(true);
-            String userId = IDUtil.genRandomId();
-            Session session = new Session(userId, username);
+        responsePacket.setRequestId(requestPacket.getRequestId());
+        try {
+            boolean allowed = AuthAttempts.allowed(ctx, username);
+            Session session = !SessionManager.hasLogin(ctx.channel()) && allowed
+                    ? cn.xjn.xim.storage.Storage.get().authenticate(username, requestPacket.getPassword()) : null;
+            if (session != null) {
+                AuthAttempts.success(username);
+                responsePacket.setUsername(session.getUsername());
+                responsePacket.setSuccess(true);
+                String userId = session.getUserId();
             responsePacket.setUserId(userId);
+            if (Boolean.TRUE.equals(ctx.channel().attr(cn.xjn.xim.attribute.Attributes.WEB).get())) {
+                var grant = cn.xjn.xim.storage.Storage.get().issueSession(userId);
+                cn.xjn.xim.web.WebSessions.bind(ctx, grant.sessionId(), grant.expiresAt());
+                responsePacket.setSessionTicket(grant.ticket());
+                responsePacket.setExpiresAt(grant.expiresAt());
+                responsePacket.setConnectionId(ctx.channel().attr(cn.xjn.xim.attribute.Attributes.CONNECTION_ID).get());
+            } else cn.xjn.xim.storage.Storage.get().revokeSessions(userId);
             SessionManager.bindSession(session, ctx.channel());
-            log.info("[{}] login successful.", requestPacket.getUsername());
-        } else {
+                cn.xjn.xim.storage.Storage.get().conversations(session.getUserId()).stream()
+                        .filter(chat -> chat.getKind().equals("group"))
+                        .forEach(chat -> SessionManager.getChannelGroup(chat.getId()).add(ctx.channel()));
+                log.info("[{}] login successful.", session.getUsername());
+            } else {
+                if (allowed && !SessionManager.hasLogin(ctx.channel())) AuthAttempts.failure(ctx, username);
+                responsePacket.setSuccess(false);
+                responsePacket.setReason(allowed ? AccountPolicy.INVALID_CREDENTIALS : AccountPolicy.LIMITED);
+                log.info("login failed.");
+            }
+        } catch (RuntimeException failure) {
+            SessionManager.unbindSession(ctx.channel());
             responsePacket.setSuccess(false);
-            responsePacket.setReason("Authentication failed");
-            log.info("login failed.");
-        }
-
+            responsePacket.setUserId(null);
+            responsePacket.setSessionTicket(null);
+            responsePacket.setReason("账号操作失败，请稍后重试");
+            log.warn("Account login operation failed");
+        } finally { requestPacket.setPassword(null); }
         ctx.channel().writeAndFlush(responsePacket);
-    }
-
-    private boolean auth(LoginRequestPacket requestPacket) {
-        String username = requestPacket.getUsername();
-        String password = requestPacket.getPassword();
-        /* test code */
-        Map<String, String> tempUserMap = new HashMap<>();
-        tempUserMap.put("root", "root");
-        tempUserMap.put("aaa", "aaa");
-        tempUserMap.put("bbb", "bbb");
-        tempUserMap.put("ccc", "ccc");
-        String pwd = tempUserMap.get(username);
-        return pwd != null && pwd.equals(password);
-        /* test code */
     }
 
     @Override

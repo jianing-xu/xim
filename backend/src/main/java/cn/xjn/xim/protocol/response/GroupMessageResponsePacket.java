@@ -18,6 +18,9 @@ public class GroupMessageResponsePacket extends Packet {
     private String fromGroupId;
 
     private String message;
+    private String id;
+    private long time;
+    private long sequence;
 
     @Override
     public Byte getCommand() {

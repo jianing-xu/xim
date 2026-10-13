@@ -12,6 +12,8 @@ public abstract class Packet {
     // protocol version
     private Byte version = 1;
 
+    private String requestId;
+
     // command
     public abstract Byte getCommand();
 }

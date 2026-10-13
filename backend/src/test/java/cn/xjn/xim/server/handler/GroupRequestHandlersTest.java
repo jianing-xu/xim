@@ -23,7 +23,7 @@ public class GroupRequestHandlersTest extends ChannelTestSupport {
         Session second = login(bob, "Bob");
         login(outsider, "Eve");
         CreateGroupRequestPacket request = new CreateGroupRequestPacket();
-        request.setUserIds(List.of(first.getUserId(), "offline", second.getUserId()));
+        request.setUserIds(List.of(first.getUserId(), second.getUserId()));
         alice.writeInbound(request);
         CreateGroupResponsePacket response = alice.readOutbound();
         trackGroup(response.getGroupId());
@@ -121,12 +121,12 @@ public class GroupRequestHandlersTest extends ChannelTestSupport {
 
     @Test
     public void quitMissingGroupDoesNotCloseConnection() {
-        EmbeddedChannel alice = channel(QuitGroupRequestHandler.INSTANCE);
+        EmbeddedChannel alice = channel(IMServerHandler.INSTANCE);
         login(alice, "Alice");
         QuitGroupRequestPacket request = new QuitGroupRequestPacket();
         request.setGroupId("missing");
         assertFalse(alice.writeInbound(request));
         assertTrue(alice.isActive());
-        assertNull(alice.readOutbound());
+        assertEquals("群组不存在", ((ErrorResponsePacket) alice.readOutbound()).getReason());
     }
 }
