@@ -16,8 +16,8 @@ public class IMServerChannelInitializerTest {
         NioSocketChannel channel = new NioSocketChannel();
         try {
             new IMServerChannelInitializer().initChannel(channel);
-            assertEquals(List.of(IMIdleStateHandler.class, Spliter.class, PacketCodecHandler.class,
-                    LoginRequestHandler.class, HeartbeatRequestHandler.class, AuthHandler.class,
+            assertEquals(List.of(cn.xjn.xim.server.limits.ConnectionGuard.class, IMIdleStateHandler.class, Spliter.class, PacketCodecHandler.class, cn.xjn.xim.server.limits.RequestRateGuard.class,
+                    LoginRequestHandler.class, AccountRequestHandler.class, HeartbeatRequestHandler.class, AuthHandler.class,
                     IMServerHandler.class),
                     channel.pipeline().toMap().values().stream().map(Object::getClass).toList());
         } finally {

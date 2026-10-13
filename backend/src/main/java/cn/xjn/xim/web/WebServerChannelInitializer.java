@@ -14,17 +14,22 @@ public class WebServerChannelInitializer extends ChannelInitializer<NioSocketCha
 
     @Override
     protected void initChannel(NioSocketChannel channel) {
+        channel.pipeline().addLast(cn.xjn.xim.server.limits.ConnectionGuard.INSTANCE);
+        channel.pipeline().addLast("handshake-timeout", new io.netty.handler.timeout.ReadTimeoutHandler(15));
         channel.pipeline().addLast(new HttpServerCodec());
         channel.pipeline().addLast(new HttpObjectAggregator(MAX_FRAME_BYTES));
-        channel.pipeline().addLast(new WebHttpHandler());
+        channel.pipeline().addLast(new cn.xjn.xim.server.limits.RequestRateGuard());
+        channel.pipeline().addLast(cn.xjn.xim.storage.Storage.EXECUTOR, new WebHttpHandler());
         channel.pipeline().addLast(new WebSocketServerProtocolHandler("/ws", null, false, MAX_FRAME_BYTES));
         channel.pipeline().addLast(new WebSocketFrameAggregator(MAX_FRAME_BYTES));
+        channel.pipeline().addLast(new cn.xjn.xim.server.limits.RequestRateGuard());
         channel.pipeline().addLast(new WebPacketEncoder());
-        channel.pipeline().addLast(new WebRequestHandler());
-        channel.pipeline().addLast(LoginRequestHandler.INSTANCE);
-        channel.pipeline().addLast(HeartbeatRequestHandler.INSTANCE);
-        channel.pipeline().addLast(AuthHandler.INSTANCE);
-        channel.pipeline().addLast(IMServerHandler.INSTANCE);
-        channel.pipeline().addLast(new WebExceptionHandler());
+        channel.pipeline().addLast(cn.xjn.xim.storage.Storage.EXECUTOR, new WebRequestHandler());
+        channel.pipeline().addLast(cn.xjn.xim.storage.Storage.EXECUTOR, LoginRequestHandler.INSTANCE);
+        channel.pipeline().addLast(cn.xjn.xim.storage.Storage.EXECUTOR, AccountRequestHandler.INSTANCE);
+        channel.pipeline().addLast(cn.xjn.xim.storage.Storage.EXECUTOR, HeartbeatRequestHandler.INSTANCE);
+        channel.pipeline().addLast(cn.xjn.xim.storage.Storage.EXECUTOR, AuthHandler.INSTANCE);
+        channel.pipeline().addLast(cn.xjn.xim.storage.Storage.EXECUTOR, IMServerHandler.INSTANCE);
+        channel.pipeline().addLast(cn.xjn.xim.storage.Storage.EXECUTOR, new WebExceptionHandler());
     }
 }

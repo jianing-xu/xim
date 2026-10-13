@@ -12,12 +12,23 @@ import java.util.List;
 import java.util.Map;
 
 public class WebPacketEncoder extends MessageToMessageEncoder<Packet> {
-    private static final Map<Byte, String> TYPES = Map.of(
-            Command.LOGIN_RESPONSE, "login", Command.LOGOUT_RESPONSE, "logout",
-            Command.MESSAGE_RESPONSE, "message", Command.CREATE_GROUP_RESPONSE, "createGroup",
-            Command.JOIN_GROUP_RESPONSE, "joinGroup", Command.QUIT_GROUP_RESPONSE, "quitGroup",
-            Command.LIST_GROUP_MEMBER_RESPONSE, "members", Command.GROUP_MESSAGE_RESPONSE, "groupMessage",
-            Command.HEARTBEAT_RESPONSE, "heartbeat");
+    private static final Map<Byte, String> TYPES = Map.ofEntries(
+            Map.entry(Command.REGISTER_RESPONSE, "register"),
+            Map.entry(Command.CHANGE_PASSWORD_RESPONSE, "changePassword"),
+            Map.entry(Command.READ_RESPONSE, "read"),
+            Map.entry(Command.LOGIN_RESPONSE, "login"),
+            Map.entry(Command.LOGOUT_RESPONSE, "logout"),
+            Map.entry(Command.MESSAGE_RESPONSE, "message"),
+            Map.entry(Command.CREATE_GROUP_RESPONSE, "createGroup"),
+            Map.entry(Command.JOIN_GROUP_RESPONSE, "joinGroup"),
+            Map.entry(Command.QUIT_GROUP_RESPONSE, "quitGroup"),
+            Map.entry(Command.LIST_GROUP_MEMBER_RESPONSE, "members"),
+            Map.entry(Command.GROUP_MESSAGE_RESPONSE, "groupMessage"),
+            Map.entry(Command.HEARTBEAT_RESPONSE, "heartbeat"),
+            Map.entry(Command.HISTORY_RESPONSE, "history"),
+            Map.entry(Command.CONVERSATIONS_RESPONSE, "conversations"),
+            Map.entry(Command.ERROR_RESPONSE, "error"),
+            Map.entry(Command.SENT_RESPONSE, "sent"));
 
     @Override
     protected void encode(ChannelHandlerContext ctx, Packet packet, List<Object> out) {

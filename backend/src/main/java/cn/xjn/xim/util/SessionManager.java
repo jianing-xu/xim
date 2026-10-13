@@ -26,11 +26,17 @@ public class SessionManager {
         if (previousSession != null && !previousSession.getUserId().equals(session.getUserId())) {
             unbindSession(channel);
         }
-        USER_ID_CHANNEL_MAP.put(session.getUserId(), channel);
+        Channel previous = USER_ID_CHANNEL_MAP.put(session.getUserId(), channel);
+        if (previous != null && previous != channel) {
+            // Clear the old identity immediately; its queued requests must lose authorization.
+            invalidate(previous, "replaced", "账号已在另一连接登录，请主动登录后继续");
+        }
         channel.attr(Attributes.SESSION).set(session);
     }
 
     public static void unbindSession(Channel channel) {
+        var expiry = channel.attr(Attributes.SESSION_EXPIRY).getAndSet(null);
+        if (expiry != null) expiry.cancel(false);
         if (hasLogin(channel)) {
             Session session = getSession(channel);
             USER_ID_CHANNEL_MAP.remove(session.getUserId(), channel);
@@ -46,6 +52,20 @@ public class SessionManager {
 
     public static Channel getChannel(String userId) {
         return USER_ID_CHANNEL_MAP.get(userId);
+    }
+    public static void invalidate(Channel channel, String code, String reason) {
+        unbindSession(channel);
+        if (Boolean.TRUE.equals(channel.attr(Attributes.WEB).get())) {
+            var event = new com.alibaba.fastjson.JSONObject();
+            event.put("type", "sessionInvalid"); event.put("code", code); event.put("reason", reason);
+            channel.writeAndFlush(new io.netty.handler.codec.http.websocketx.TextWebSocketFrame(event.toJSONString()))
+                    .addListener(io.netty.channel.ChannelFutureListener.CLOSE);
+        } else channel.close();
+    }
+    /** Password changes also increment ChatStore.credentialVersion, invalidating future resume credentials. */
+    public static void revokeUserSessions(String userId) {
+        Channel channel = getChannel(userId);
+        if (channel != null) { unbindSession(channel); channel.close(); }
     }
 
     public static boolean hasLogin(Channel channel) {
@@ -65,7 +85,14 @@ public class SessionManager {
     }
 
     public static ChannelGroup getChannelGroup(String groupId) {
-        return GROUP_ID_CHANNEL_GROUP_MAP.get(groupId);
+        if (!cn.xjn.xim.storage.Storage.get().hasGroup(groupId)) return null;
+        ChannelGroup group = GROUP_ID_CHANNEL_GROUP_MAP.computeIfAbsent(groupId,
+                key -> new io.netty.channel.group.DefaultChannelGroup(io.netty.util.concurrent.GlobalEventExecutor.INSTANCE));
+        for (Session member : cn.xjn.xim.storage.Storage.get().members(groupId)) {
+            Channel channel = getChannel(member.getUserId());
+            if (channel != null && channel.isActive() && hasLogin(channel)) group.add(channel);
+        }
+        return group;
     }
 
     public static void unbindChannelGroup(String groupId) {

@@ -24,6 +24,7 @@ public class WebRequestHandler extends SimpleChannelInboundHandler<WebSocketFram
     @Override
     public void userEventTriggered(ChannelHandlerContext ctx, Object event) throws Exception {
         if (event instanceof WebSocketServerProtocolHandler.HandshakeComplete) {
+            if (ctx.pipeline().get("handshake-timeout") != null) ctx.pipeline().remove("handshake-timeout");
             // Only upgraded WebSocket connections use the IM idle timeout.
             ctx.pipeline().addBefore(ctx.name(), "web-idle", new IdleStateHandler(60, 0, 0, TimeUnit.SECONDS));
         } else if (event instanceof IdleStateEvent) {
@@ -43,10 +44,14 @@ public class WebRequestHandler extends SimpleChannelInboundHandler<WebSocketFram
             JSONObject json = JSON.parseObject(text.text(), Feature.DisableSpecialKeyDetect);
             require(json != null, "请求必须是 JSON 对象");
             Object id = json.get("requestId");
-            require(id == null || id instanceof String && ((String) id).length() <= 80, "请求编号无效");
+            require(id == null || id instanceof String && !((String) id).isBlank() && ((String) id).length() <= 80, "请求编号无效");
             requestId = (String) id;
             String type = string(json, "type", 30);
+            if (!WebSessions.validate(ctx)) return;
             Packet packet;
+            if (type.equals("resume")) {
+                resume(ctx,json); return;
+            }
             if (type.equals("heartbeat")) {
                 ctx.fireChannelRead(new HeartbeatRequestPacket());
                 return;
@@ -54,25 +59,88 @@ public class WebRequestHandler extends SimpleChannelInboundHandler<WebSocketFram
             if (type.equals("login")) {
                 require(!SessionManager.hasLogin(ctx.channel()), "请先退出当前账号");
                 LoginRequestPacket login = new LoginRequestPacket();
-                login.setUsername(string(json, "username", 64));
-                login.setPassword(string(json, "password", 128));
+                login.setRequestId(requestId);
+                login.setUsername(credential(json, "username"));
+                login.setPassword(credential(json, "password"));
                 ctx.fireChannelRead(login);
+                return;
+            }
+            if (type.equals("register")) {
+                RegisterRequestPacket register = new RegisterRequestPacket();
+                register.setRequestId(requestId);
+                register.setUsername(credential(json, "username"));
+                register.setPassword(credential(json, "password"));
+                if (json.containsKey("displayName")) register.setDisplayName(string(json, "displayName", 64));
+                ctx.fireChannelRead(register);
                 return;
             }
             require(SessionManager.hasLogin(ctx.channel()), "请先登录");
             switch (type) {
+                case "revokeSessions" -> {
+                    cn.xjn.xim.storage.Storage.get().revokeSessions(SessionManager.getSession(ctx.channel()).getUserId());
+                    SessionManager.invalidate(ctx.channel(),"revoked","所有登录凭证已撤销，请重新登录");
+                    return;
+                }
+                case "changePassword" -> {
+                    ChangePasswordRequestPacket change = new ChangePasswordRequestPacket();
+                    change.setCurrentPassword(credential(json, "currentPassword"));
+                    change.setNewPassword(credential(json, "newPassword"));
+                    packet = change;
+                }
                 case "users" -> {
                     JSONObject response = event("users");
                     response.put("users", SessionManager.getOnlineSessions());
                     write(ctx, response);
                     return;
                 }
+                case "contacts" -> {
+                    require(requestId != null, "联系人查询需要请求编号");
+                    Object search = json.getOrDefault("query", "");
+                    require(search instanceof String, "搜索词无效");
+                    Object size = json.getOrDefault("limit", 20);
+                    require(size instanceof Integer, "联系人页大小无效");
+                    String after = json.containsKey("after") ? string(json, "after", 64) : null;
+                    cn.xjn.xim.storage.ChatStore.Contacts page;
+                    try {
+                        page = cn.xjn.xim.storage.Storage.get().contacts(SessionManager.getSession(ctx.channel()).getUserId(),
+                                (String) search, after, (Integer) size);
+                    } catch (IllegalStateException unavailable) {
+                        error(ctx, requestId, "联系人查询失败，请稍后重试"); return;
+                    }
+                    var online = SessionManager.getOnlineSessions().stream().map(cn.xjn.xim.session.Session::getUserId)
+                            .collect(java.util.stream.Collectors.toSet());
+                    var contacts = new JSONArray();
+                    for (var user : page.users()) {
+                        JSONObject contact = new JSONObject();
+                        contact.put("userId", user.getUserId()); contact.put("username", user.getUsername());
+                        contact.put("displayName", user.getDisplayName()); contact.put("online", online.contains(user.getUserId()));
+                        contacts.add(contact);
+                    }
+                    JSONObject response = event("contacts"); response.put("requestId", requestId);
+                    response.put("users", contacts); response.put("hasMore", page.hasMore()); response.put("nextAfter", page.nextAfter());
+                    write(ctx, response); return;
+                }
+                case "conversations" -> packet = new ConversationsRequestPacket();
+                case "read" -> {
+                    ReadRequestPacket read = new ReadRequestPacket();
+                    read.setKind(string(json, "kind", 10)); read.setId(string(json, "id", 64));
+                    read.setSequence(string(json, "sequence", 30)); packet = read;
+                }
+                case "history" -> {
+                    HistoryRequestPacket history = new HistoryRequestPacket();
+                    history.setKind(string(json, "kind", 10)); history.setId(string(json, "id", 64));
+                    if (json.containsKey("before")) history.setBefore(string(json, "before", 30));
+                    if (json.containsKey("after")) history.setAfter(string(json, "after", 30));
+                    if (json.containsKey("limit")) {
+                        Object limit = json.get("limit");
+                        require(limit instanceof Integer, "历史页大小无效"); history.setLimit((Integer) limit);
+                    }
+                    packet = history;
+                }
                 case "logout" -> packet = new LogoutRequestPacket();
                 case "message" -> {
                     String toUserId = string(json, "toUserId", 64);
                     require(!toUserId.equals(SessionManager.getSession(ctx.channel()).getUserId()), "请选择其他用户");
-                    var receiver = SessionManager.getChannel(toUserId);
-                    require(receiver != null && receiver.isActive() && SessionManager.hasLogin(receiver), "对方已离线，消息未发送");
                     packet = new MessageRequestPacket(toUserId, message(json));
                 }
                 case "createGroup" -> {
@@ -84,8 +152,6 @@ public class WebRequestHandler extends SimpleChannelInboundHandler<WebSocketFram
                     ids.add(SessionManager.getSession(ctx.channel()).getUserId());
                     for (Object user : users) {
                         require(user instanceof String && ((String) user).length() <= 64, "成员编号无效");
-                        var member = SessionManager.getChannel((String) user);
-                        require(member != null && member.isActive() && SessionManager.hasLogin(member), "部分成员已离线，请刷新后重试");
                         ids.add((String) user);
                     }
                     CreateGroupRequestPacket create = new CreateGroupRequestPacket();
@@ -99,9 +165,6 @@ public class WebRequestHandler extends SimpleChannelInboundHandler<WebSocketFram
                 }
                 case "members", "quitGroup", "groupMessage" -> {
                     String groupId = string(json, "groupId", 64);
-                    var group = SessionManager.getChannelGroup(groupId);
-                    require(group != null, "群组不存在");
-                    require(group.contains(ctx.channel()), "请先加入该群组");
                     if (type.equals("members")) {
                         ListGroupMemberRequestPacket members = new ListGroupMemberRequestPacket();
                         members.setGroupId(groupId);
@@ -116,21 +179,47 @@ public class WebRequestHandler extends SimpleChannelInboundHandler<WebSocketFram
                 }
                 default -> throw new IllegalArgumentException("不支持的操作");
             }
+            packet.setRequestId(requestId);
             ctx.fireChannelRead(packet);
-            if (type.equals("message") || type.equals("groupMessage")) {
-                JSONObject sent = event("sent");
-                sent.put("requestId", requestId);
-                write(ctx, sent);
-            }
         } catch (RuntimeException invalid) {
             error(ctx, requestId, invalid instanceof IllegalArgumentException ? invalid.getMessage() : "请求格式错误");
         }
+    }
+
+    private void resume(ChannelHandlerContext ctx, JSONObject json) {
+        require(!SessionManager.hasLogin(ctx.channel()),"请先退出当前账号");
+        var credential = cn.xjn.xim.storage.Storage.get().resumeSession(ctx.channel().attr(cn.xjn.xim.attribute.Attributes.COOKIE_TOKEN).get());
+        if (credential == null) {
+            JSONObject response = event("resume"); response.put("success",false);
+            response.put("reason","登录凭证已过期、撤销或不存在，请重新登录"); write(ctx,response); return;
+        }
+        var previous = SessionManager.getChannel(credential.user().getUserId());
+        Object connectionId = json.get("connectionId");
+        if (previous != null && previous != ctx.channel() && previous.isActive()
+                && !(credential.sessionId().equals(previous.attr(cn.xjn.xim.attribute.Attributes.SESSION_ID).get())
+                     && connectionId instanceof String && connectionId.equals(previous.attr(cn.xjn.xim.attribute.Attributes.CONNECTION_ID).get()))) {
+            JSONObject response = event("sessionInvalid"); response.put("code","replaced");
+            response.put("reason","账号已在另一窗口连接，自动恢复已停止，请主动登录"); write(ctx,response); return;
+        }
+        SessionManager.bindSession(credential.user(),ctx.channel());
+        WebSessions.bind(ctx,credential.sessionId(),credential.expiresAt());
+        cn.xjn.xim.storage.Storage.get().conversations(credential.user().getUserId()).stream()
+                .filter(chat -> chat.getKind().equals("group")).forEach(chat -> SessionManager.getChannelGroup(chat.getId()).add(ctx.channel()));
+        JSONObject response = event("resume"); response.put("success",true);
+        response.put("userId",credential.user().getUserId()); response.put("username",credential.user().getUsername());
+        response.put("connectionId",ctx.channel().attr(cn.xjn.xim.attribute.Attributes.CONNECTION_ID).get());
+        response.put("expiresAt",credential.expiresAt()); write(ctx,response);
     }
 
     private static String message(JSONObject json) {
         String message = string(json, "message", MAX_MESSAGE_LENGTH);
         require(!message.isBlank(), "消息不能为空");
         return message;
+    }
+    private static String credential(JSONObject json, String field) {
+        Object value = json.get(field);
+        require(value == null || value instanceof String, "账号或密码格式错误");
+        return (String) value;
     }
 
     private static String string(JSONObject json, String field, int max) {

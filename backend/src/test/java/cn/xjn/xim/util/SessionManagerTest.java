@@ -71,11 +71,13 @@ public class SessionManagerTest extends ChannelTestSupport {
 
     @Test
     public void bindsAndRemovesGroup() {
-        String id = group(channel());
+        EmbeddedChannel member = channel();
+        login(member, "Alice");
+        String id = group(member);
         assertNotNull(SessionManager.getChannelGroup(id));
         SessionManager.unbindChannelGroup(id);
         SessionManager.unbindChannelGroup(id);
-        assertNull(SessionManager.getChannelGroup(id));
+        assertTrue(SessionManager.getChannelGroup(id).contains(member));
         assertNull(SessionManager.getChannelGroup("missing"));
     }
 }
