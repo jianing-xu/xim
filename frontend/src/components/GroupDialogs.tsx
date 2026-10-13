@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import type { ChatClient } from '../chat-client';
-import type { ChatState } from '../protocol';
+import type { ChatState, Contact } from '../protocol';
 import { Avatar } from './Avatar';
+import { ContactSearch, ContactStatus } from './ContactDirectory';
 
 export type GroupDialog = 'create' | 'join' | 'leave' | null;
 
@@ -18,25 +19,36 @@ function Modal({ id, title, onClose, children }: { id: string; title: string; on
 export function GroupDialogs({ client, state, dialog, onClose }: {
   client: ChatClient; state: ChatState; dialog: GroupDialog; onClose: () => void;
 }) {
-  const [selected, setSelected] = useState<string[]>([]);
+  const [selected, setSelected] = useState<Contact[]>([]);
   const [groupId, setGroupId] = useState('');
-  const users = state.users.filter(user => user.userId !== state.session?.userId);
+  const users = state.directory.users.filter(user => user.userId !== state.session?.userId);
+  useEffect(() => { if (dialog === 'create') { setSelected([]); client.browseContacts(); } }, [dialog, client]);
   const chat = state.conversations.find(item => item.key === state.current);
   return <>
     {dialog === 'create' && <Modal id="group-dialog" title="创建群聊" onClose={onClose}>
       <form id="group-form" onSubmit={event => {
         event.preventDefault();
-        if (client.createGroup(selected.filter(id => users.some(user => user.userId === id)))) onClose();
+        if (client.createGroup(selected.map(user => user.userId))) onClose();
       }}>
-        <p className="muted">选择在线伙伴。你会自动加入新群聊。</p>
+        <p className="muted">选择伙伴，离线也能加入。你会自动加入新群聊。</p>
+        <ContactSearch id="group-contact-search" client={client} state={state} />
+        <div className="selected-members" aria-label="已选择群成员">
+          <span className="muted">已选择 {selected.length}/50 位</span>
+          {selected.map(user => <button key={user.userId} type="button" className="text-button"
+            aria-label={'取消选择 ' + user.displayName} onClick={() => setSelected(previous => previous.filter(item => item.userId !== user.userId))}>
+            {user.displayName} ×
+          </button>)}
+        </div>
         <div id="group-options" className="group-options">
           {users.map(user => <label key={user.userId} className="group-choice">
-            <input type="checkbox" name="member" value={user.userId} checked={selected.includes(user.userId)}
-              onChange={event => setSelected(previous => event.target.checked ? [...previous, user.userId] : previous.filter(id => id !== user.userId))} />
-            <Avatar name={user.username} /><span>{user.username} · {user.userId}</span>
+            <input type="checkbox" name="member" value={user.userId} checked={selected.some(item => item.userId === user.userId)}
+              disabled={selected.length >= 50 && !selected.some(item => item.userId === user.userId)}
+              onChange={event => setSelected(previous => event.target.checked ? [...previous, user] : previous.filter(item => item.userId !== user.userId))} />
+            <Avatar name={user.displayName} /><span>{user.displayName}<small className="contact-detail">
+              {state.connection === 'online' && !state.restoring && user.online ? '在线' : '离线'} · {user.username}</small></span>
           </label>)}
-          {!users.length && <p className="muted">暂时没有其他伙伴在线。可以先创建群聊，再分享群号。</p>}
-        </div><button className="primary" type="submit">创建群聊</button>
+          <ContactStatus client={client} state={state} />
+        </div><button className="primary" type="submit" disabled={state.connection !== 'online' || state.restoring || state.syncing}>创建群聊</button>
       </form>
     </Modal>}
     {dialog === 'join' && <Modal id="join-dialog" title="加入群聊" onClose={onClose}>

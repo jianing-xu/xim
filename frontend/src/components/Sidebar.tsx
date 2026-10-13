@@ -1,49 +1,61 @@
 import { useState } from 'react';
 import type { ChatClient } from '../chat-client';
-import type { ChatState } from '../protocol';
+import type { ChatState, ConversationSummary } from '../protocol';
 import { Avatar } from './Avatar';
+import { ContactSearch, ContactStatus } from './ContactDirectory';
 
-export function Sidebar({ client, state, onCreate, onJoin }: {
-  client: ChatClient; state: ChatState; onCreate: () => void; onJoin: () => void;
+const activityTime = new Intl.DateTimeFormat('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+
+export function Sidebar({ client, state, onCreate, onJoin, onPassword }: {
+  client: ChatClient; state: ChatState; onCreate: () => void; onJoin: () => void; onPassword: () => void;
 }) {
   const [search, setSearch] = useState('');
   const users = state.users.filter(user => user.userId !== state.session?.userId);
-  const entries = state.tab === 'users'
-    ? users.map(user => ({ kind: 'user' as const, id: user.userId, name: user.username,
-      key: `user:${user.userId}`, messages: [], unread: 0 }))
-    : [...state.conversations].reverse();
+  const entries: (ConversationSummary & { key: string })[] = state.tab === 'users'
+    ? state.directory.users.filter(user => user.userId !== state.session?.userId).map(user => ({
+      ...state.conversations.find(chat => chat.key === 'user:' + user.userId),
+      kind: 'user' as const, id: user.userId, name: user.displayName, key: 'user:' + user.userId }))
+    : state.conversations;
   const query = search.trim().toLowerCase();
-  const filtered = entries.filter(chat => `${chat.name} ${chat.id}`.toLowerCase().includes(query));
+  const filtered = state.tab === 'users' ? entries : entries.filter(chat => (chat.name + ' ' + chat.id).toLowerCase().includes(query));
   const session = state.session!;
   return <aside id="sidebar" className="sidebar" aria-label="会话与联系人">
     <div className="sidebar-title"><h2>消息</h2><button id="new-group" className="icon-button" title="创建群聊" aria-label="创建群聊" onClick={onCreate}>＋</button></div>
     <div className="tabs" role="tablist" aria-label="列表类型">
-      <button id="conversations-tab" className={`tab${state.tab === 'conversations' ? ' active' : ''}`} role="tab"
+      <button id="conversations-tab" className={'tab' + (state.tab === 'conversations' ? ' active' : '')} role="tab"
         aria-selected={state.tab === 'conversations'} aria-controls="list" onClick={() => client.switchTab('conversations')}>会话</button>
-      <button id="users-tab" className={`tab${state.tab === 'users' ? ' active' : ''}`} role="tab"
+      <button id="users-tab" className={'tab' + (state.tab === 'users' ? ' active' : '')} role="tab"
         aria-selected={state.tab === 'users'} aria-controls="list" onClick={() => client.switchTab('users')}>
-        在线 <span id="online-count">{users.length}</span>
+        联系人 <span id="online-count">{state.connection === 'online' && !state.restoring ? users.length : 0} 在线</span>
       </button>
     </div>
-    <div className="search"><span aria-hidden="true">⌕</span><input id="search" type="search" placeholder="搜索联系人或群组"
-      aria-label="搜索联系人或群组" value={search} onChange={event => setSearch(event.target.value)} /></div>
+    {state.tab === 'users' ? <ContactSearch client={client} state={state} /> : <div className="search"><span aria-hidden="true">⌕</span>
+      <input id="search" type="search" placeholder="搜索会话或群组" aria-label="搜索会话或群组" value={search}
+        onChange={event => setSearch(event.target.value)} /></div>}
     <div id="list" className="conversation-list" role="tabpanel" aria-labelledby={state.tab === 'users' ? 'users-tab' : 'conversations-tab'}>
-      {filtered.map(chat => <button key={chat.key} className={`conversation${state.current === chat.key ? ' selected' : ''}`}
+      {filtered.map(chat => <button key={chat.key} className={'conversation' + (state.current === chat.key ? ' selected' : '')}
         onClick={() => client.choose(chat.kind, chat.id, chat.name)}>
         <Avatar name={chat.name} group={chat.kind === 'group'} />
         <span className="conversation-copy"><strong>{chat.name}</strong><span className="preview">
-          {state.tab === 'users' ? `在线 · ${chat.id}` : chat.messages.at(-1)?.text || (chat.kind === 'group' ? `群号 ${chat.id}` : '开始你们的对话')}
+          {state.tab === 'users'
+            ? (client.isOnline(chat) ? '在线' : '离线') + ' · ' + state.directory.users.find(user => user.userId === chat.id)?.username
+            : chat.lastMessage?.message || (chat.kind === 'group' ? '群号 ' + chat.id : '开始你们的对话')}
         </span></span>
-        {chat.unread ? <span className="unread">{chat.unread > 99 ? '99+' : chat.unread}</span>
-          : chat.kind === 'user' && state.users.some(user => user.userId === chat.id) ? <span className="presence" /> : null}
+        <span className="conversation-meta">
+          {chat.lastTime ? <time dateTime={new Date(chat.lastTime).toISOString()}>{activityTime.format(chat.lastTime)}</time> : null}
+          {chat.unread ? <span className="unread">{chat.unread > 99 ? '99+' : chat.unread}</span>
+            : chat.kind === 'user' && client.isOnline(chat) ? <span className="presence" /> : null}
+        </span>
       </button>)}
-      {!filtered.length && <p className="list-empty">{query ? '没有找到匹配的联系人或群组' : state.tab === 'users'
-        ? <>还没有其他伙伴在线。<br />用另一个窗口登录，即可开始聊天。</>
-        : <>还没有会话。<br />去在线列表找一个伙伴吧。</>}</p>}
+      {state.tab === 'users' ? <ContactStatus client={client} state={state} /> : !filtered.length && <p className="list-empty">
+        {query ? '没有找到匹配的会话或群组' : <>还没有会话。<br />去联系人中找一个伙伴吧。</>}
+      </p>}
     </div>
     <button id="join-group" className="join-button" onClick={onJoin}>通过群号加入群聊 <span aria-hidden="true">↗</span></button>
+    <button id="revoke-sessions" className="join-button" onClick={() => client.revokeSessions()}>撤销登录凭证</button>
+    <button id="change-password" className="join-button" onClick={onPassword}>修改密码</button>
     <div className="profile"><Avatar id="self-avatar" name={session.username} /><div>
       <strong id="self-name">{session.username}</strong><span id="self-id" className="mono">{session.userId}</span>
-    </div><button id="logout" className="icon-button" title="退出登录" aria-label="退出登录" onClick={() => client.send({ type: 'logout' })}>↪</button></div>
+    </div><button id="logout" className="icon-button" title="退出登录" aria-label="退出登录" onClick={() => client.logout()}>↪</button></div>
   </aside>;
 }
