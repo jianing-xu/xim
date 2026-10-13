@@ -4,6 +4,7 @@ import type { ChatClient } from '../chat-client';
 import type { ChatState, ConversationSummary } from '../protocol';
 import { Avatar } from './Avatar';
 import { ContactSearch, ContactStatus } from './ContactDirectory';
+import { Icon } from './Icon';
 
 const activityTime = new Intl.DateTimeFormat('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' });
 
@@ -21,16 +22,16 @@ export function Sidebar({ client, state, onCreate, onJoin, onPassword }: {
   const filtered = state.tab === 'users' ? entries : entries.filter(chat => (chat.name + ' ' + chat.id).toLowerCase().includes(query));
   const session = state.session!;
   return <aside id="sidebar" className="sidebar" aria-label="会话与联系人">
-    <div className="sidebar-title"><h2>消息</h2><button id="new-group" className="icon-button" title="创建群聊" aria-label="创建群聊" onClick={onCreate}>＋</button></div>
+    <div className="sidebar-title"><div><span className="section-label">沟通工作台</span><h2>消息</h2></div><button id="new-group" className="icon-button new-group" title="创建群聊" aria-label="创建群聊" onClick={onCreate}><Icon name="plus" /></button></div>
     <div className="tabs" role="tablist" aria-label="列表类型">
       <button id="conversations-tab" className={'tab' + (state.tab === 'conversations' ? ' active' : '')} role="tab"
-        aria-selected={state.tab === 'conversations'} aria-controls="list" onClick={() => client.switchTab('conversations')}>会话</button>
+        aria-selected={state.tab === 'conversations'} aria-controls="list" onClick={() => client.switchTab('conversations')}><Icon name="message" size={17} />会话</button>
       <button id="users-tab" className={'tab' + (state.tab === 'users' ? ' active' : '')} role="tab"
         aria-selected={state.tab === 'users'} aria-controls="list" onClick={() => client.switchTab('users')}>
-        联系人 <span id="online-count">{state.connection === 'online' && !state.restoring ? users.length : 0} 在线</span>
+        <Icon name="users" size={17} />联系人 <span id="online-count">{state.connection === 'online' && !state.restoring ? users.length : 0} 在线</span>
       </button>
     </div>
-    {state.tab === 'users' ? <ContactSearch client={client} state={state} /> : <div className="search"><span aria-hidden="true">⌕</span>
+    {state.tab === 'users' ? <ContactSearch client={client} state={state} /> : <div className="search"><Icon name="search" size={18} />
       <input id="search" type="search" placeholder="搜索会话或群组" aria-label="搜索会话或群组" value={search}
         onChange={event => setSearch(event.target.value)} /></div>}
     <div id="list" className="conversation-list" role="tabpanel" aria-labelledby={state.tab === 'users' ? 'users-tab' : 'conversations-tab'}>
@@ -52,11 +53,15 @@ export function Sidebar({ client, state, onCreate, onJoin, onPassword }: {
         {query ? '没有找到匹配的会话或群组' : <>还没有会话。<br />去联系人中找一个伙伴吧。</>}
       </p>}
     </div>
-    <button id="join-group" className="join-button" onClick={onJoin}>通过群号加入群聊 <span aria-hidden="true">↗</span></button>
-    <button id="revoke-sessions" className="join-button" onClick={() => client.revokeSessions()}>撤销登录凭证</button>
-    <button id="change-password" className="join-button" onClick={onPassword}>修改密码</button>
+    <div className="sidebar-actions">
+      <button id="join-group" className="join-button" onClick={onJoin}><Icon name="users" size={18} />通过群号加入群聊 <Icon name="arrow" size={16} /></button>
+      <div className="account-actions">
+        <button id="change-password" className="text-button" onClick={onPassword}><Icon name="lock" size={14} />修改密码</button>
+        <button id="revoke-sessions" className="text-button" onClick={() => client.revokeSessions()}>撤销登录凭证</button>
+      </div>
+    </div>
     <div className="profile"><Avatar id="self-avatar" name={session.username} /><div>
       <strong id="self-name">{session.username}</strong><span id="self-id" className="mono">{session.userId}</span>
-    </div><button id="logout" className="icon-button" title="退出登录" aria-label="退出登录" onClick={() => client.logout()}>↪</button></div>
+    </div><button id="logout" className="icon-button" title="退出登录" aria-label="退出登录" onClick={() => client.logout()}><Icon name="logout" size={18} /></button></div>
   </aside>;
 }

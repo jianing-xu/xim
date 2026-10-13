@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="none">
+  <title>XIM</title>
+  <rect width="64" height="64" rx="16" fill="#3247C9"/>
+  <path d="M39 16H49L25 48H15L39 16Z" fill="#FFF"/>
+  <path d="M15 16H25L49 48H39L15 16Z" fill="#FFF" stroke="#3247C9" stroke-width="4" stroke-linejoin="round" paint-order="stroke fill"/>
+</svg>

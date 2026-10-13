@@ -3,6 +3,7 @@ import type { ChatClient } from '../chat-client';
 import type { ChatState, Contact } from '../protocol';
 import { Avatar } from './Avatar';
 import { ContactSearch, ContactStatus } from './ContactDirectory';
+import { Icon } from './Icon';
 
 export type GroupDialog = 'create' | 'join' | 'leave' | null;
 
@@ -11,7 +12,7 @@ function Modal({ id, title, onClose, children }: { id: string; title: string; on
   useEffect(() => { const dialog = ref.current; dialog?.showModal(); return () => dialog?.close(); }, []);
   return <dialog id={id} ref={ref} aria-labelledby={`${id}-title`} onCancel={onClose}>
     <div className="dialog-header"><h2 id={`${id}-title`}>{title}</h2>
-      <button type="button" className="icon-button" aria-label="关闭" onClick={onClose}>×</button>
+      <button type="button" className="icon-button" aria-label="关闭" onClick={onClose}><Icon name="close" /></button>
     </div>{children}
   </dialog>;
 }

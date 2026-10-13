@@ -2,6 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useRef, type FormEvent } from 
 import type { ChatClient } from '../chat-client';
 import type { ChatState, Conversation } from '../protocol';
 import { Avatar } from './Avatar';
+import { Icon } from './Icon';
 
 const clock = new Intl.DateTimeFormat('zh-CN', { hour: '2-digit', minute: '2-digit' });
 
@@ -10,9 +11,9 @@ export function ChatPanel({ client, state, onLeave }: { client: ChatClient; stat
   return <section className="chat-panel" aria-label="聊天内容">
     {chat ? <ActiveChat key={chat.key} client={client} state={state} chat={chat} onLeave={onLeave} />
       : <div id="empty-chat" className="empty-chat">
-        <div className="empty-symbol" aria-hidden="true">↔</div><span className="eyebrow">对话从这里开始</span>
-        <h2>发出你的第一句「你好」</h2><p>在联系人中选择一个伙伴，离线也能留言，<br />或创建群聊，邀请大家一起聊。</p>
-        <button id="browse-users" className="secondary" onClick={() => client.switchTab('users')}>查找联系人 <span aria-hidden="true">→</span></button>
+        <div className="empty-symbol" aria-hidden="true"><Icon name="message" size={32} /></div><span className="eyebrow">对话从这里开始</span>
+        <h2>开启一段新的对话</h2><p>选择联系人开始沟通，离线也能留言。<br />或创建群聊，让讨论在这里继续。</p>
+        <button id="browse-users" className="secondary" onClick={() => client.switchTab('users')}>查找联系人 <Icon name="arrow" size={17} /></button>
       </div>}
   </section>;
 }
@@ -58,7 +59,7 @@ function ActiveChat({ client, state, chat, onLeave }: {
   }
   return <div id="active-chat" className="active-chat">
     <header className="chat-header">
-      <button id="back" className="icon-button mobile-only" aria-label="返回会话列表" onClick={() => client.back()}>←</button>
+      <button id="back" className="icon-button mobile-only" aria-label="返回会话列表" onClick={() => client.back()}><Icon name="back" /></button>
       <Avatar id="chat-avatar" name={chat.name} group={chat.kind === 'group'} />
       <div className="chat-heading"><h2 id="chat-title">{chat.name}</h2><span id="chat-subtitle">
         {chat.kind === 'group' ? `群号 ${chat.id}` : `${online ? '在线' : '离线'} · ${chat.id}`}
@@ -70,7 +71,7 @@ function ActiveChat({ client, state, chat, onLeave }: {
     </header>
     <div id="messages" className="messages" role="log" aria-live="polite" aria-label="消息列表" ref={messages}
       onScroll={() => { const list = messages.current; if (list) followMessages.current = list.scrollHeight - list.scrollTop - list.clientHeight < 80; reportReading(); }}>
-      <button className="text-button" disabled={chat.historyLoading || (chat.historyLoaded && !chat.hasMore)}
+      <button className="text-button history-button" disabled={chat.historyLoading || (chat.historyLoaded && !chat.hasMore)}
         onClick={() => { followMessages.current = false; client.loadHistory(chat.key); }}>
         {chat.historyLoading ? '正在加载历史…' : chat.historyLoaded && !chat.hasMore ? '已显示全部历史' : '加载更早消息'}
       </button>
@@ -97,7 +98,7 @@ function ActiveChat({ client, state, chat, onLeave }: {
           }
         }} />
       <div className="composer-footer"><span id="compose-hint">{chat.kind === 'user' && !online ? '对方离线，消息将在登录后恢复' : 'Enter 发送 · Shift + Enter 换行'}</span>
-        <button id="send" type="submit" className="primary" disabled={!canSend}>发送 <span aria-hidden="true">↗</span></button>
+        <button id="send" type="submit" className="primary" disabled={!canSend}>发送 <Icon name="send" size={17} /></button>
       </div>
     </form>
   </div>;

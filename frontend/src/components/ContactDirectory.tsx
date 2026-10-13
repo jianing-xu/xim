@@ -1,8 +1,9 @@
 import type { ChatClient } from '../chat-client';
 import type { ChatState } from '../protocol';
+import { Icon } from './Icon';
 
 export function ContactSearch({ client, state, id = 'contact-search' }: { client: ChatClient; state: ChatState; id?: string }) {
-  return <div className="search"><span aria-hidden="true">⌕</span><input id={id} type="search" maxLength={64}
+  return <div className="search"><Icon name="search" size={18} /><input id={id} type="search" maxLength={64}
     placeholder="搜索账号或显示名" aria-label="搜索账号或显示名" value={state.directory.query}
     onChange={event => client.searchContacts(event.target.value)} /></div>;
 }

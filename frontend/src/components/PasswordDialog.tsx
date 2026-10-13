@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type { ChatClient } from '../chat-client';
 import type { ChatState } from '../protocol';
+import { Icon } from './Icon';
 
 export function PasswordDialog({ client, state, onClose }: { client: ChatClient; state: ChatState; onClose: () => void }) {
   const ref = useRef<HTMLDialogElement>(null);
@@ -11,7 +12,7 @@ export function PasswordDialog({ client, state, onClose }: { client: ChatClient;
   useEffect(() => { ref.current?.showModal(); client.clearAccountFeedback(); return () => ref.current?.close(); }, [client]);
   return <dialog id="password-dialog" ref={ref} aria-labelledby="password-title" onCancel={onClose}>
     <div className="dialog-header"><h2 id="password-title">修改密码</h2>
-      <button type="button" className="icon-button" aria-label="关闭" onClick={onClose}>×</button></div>
+      <button type="button" className="icon-button" aria-label="关闭" onClick={onClose}><Icon name="close" /></button></div>
     <form onSubmit={event => {
       event.preventDefault();
       if (next !== confirmation) { setError('两次新密码不一致'); return; }
