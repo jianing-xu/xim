@@ -5,7 +5,6 @@ import cn.xjn.xim.protocol.command.Command;
 import cn.xjn.xim.protocol.request.*;
 import cn.xjn.xim.protocol.response.*;
 import cn.xjn.xim.serialize.Serializer;
-import cn.xjn.xim.serialize.impl.JSONSerializer;
 import io.netty.buffer.ByteBuf;
 import io.netty.handler.codec.CorruptedFrameException;
 
@@ -58,13 +57,14 @@ public class PacketCodec {
         packetTypeMap.put(Command.CHANGE_PASSWORD_REQUEST, ChangePasswordRequestPacket.class);
         packetTypeMap.put(Command.CHANGE_PASSWORD_RESPONSE, ChangePasswordResponsePacket.class);
         this.serializerMap = new HashMap<>();
-        JSONSerializer jsonSerializer = new JSONSerializer();
-        serializerMap.put(jsonSerializer.getSerializerAlgorithm(), jsonSerializer);
+        serializerMap.put(Serializer.DEFAULT.getSerializerAlgorithm(), Serializer.DEFAULT);
     }
 
     public void encode(ByteBuf byteBuf, Packet packet) {
         // 1. serialize java object
         byte[] content = Serializer.DEFAULT.serialize(packet);
+        if (packet.getVersion() != cn.xjn.xim.protobuf.ProtocolWire.VERSION || content.length > Spliter.MAX_FRAME_BYTES - HEADER_LENGTH)
+            throw new CorruptedFrameException("Invalid packet size or version");
 
         // 2. the actual coding process
         byteBuf.writeInt(MAGIC_NUMBER);
@@ -89,11 +89,13 @@ public class PacketCodec {
         byte command = byteBuf.readByte();
         // packet length
         int length = byteBuf.readInt();
-        if (length < 0 || length > byteBuf.readableBytes()) {
+        if (length < 0 || length > Spliter.MAX_FRAME_BYTES - HEADER_LENGTH || length > byteBuf.readableBytes()) {
             throw new CorruptedFrameException("Invalid packet length: " + length);
         }
         byte[] content = new byte[length];
         byteBuf.readBytes(content);
+
+        if (version != cn.xjn.xim.protobuf.ProtocolWire.VERSION) throw new CorruptedFrameException("Unsupported protocol version; upgrade client");
 
         Class<? extends Packet> requestType = getRequestType(command);
         Serializer serializer = getSerializer(serializeAlgorithm);
@@ -102,7 +104,7 @@ public class PacketCodec {
             Packet packet;
             try { packet = serializer.deserialize(content, requestType); }
             catch (RuntimeException invalid) {
-                // Parser exception messages can contain the original JSON, including passwords.
+                // Never expose parser data or credentials in exceptions.
                 throw new CorruptedFrameException("Invalid packet payload");
             }
             if (packet != null) {

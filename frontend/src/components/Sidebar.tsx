@@ -1,3 +1,4 @@
+import { positive, compareInt } from '../integers';
 import { useState } from 'react';
 import type { ChatClient } from '../chat-client';
 import type { ChatState, ConversationSummary } from '../protocol';
@@ -43,7 +44,7 @@ export function Sidebar({ client, state, onCreate, onJoin, onPassword }: {
         </span></span>
         <span className="conversation-meta">
           {chat.lastTime ? <time dateTime={new Date(chat.lastTime).toISOString()}>{activityTime.format(chat.lastTime)}</time> : null}
-          {chat.unread ? <span className="unread">{chat.unread > 99 ? '99+' : chat.unread}</span>
+          {positive(chat.unread) ? <span className="unread">{compareInt(chat.unread, 99) > 0 ? '99+' : chat.unread}</span>
             : chat.kind === 'user' && client.isOnline(chat) ? <span className="presence" /> : null}
         </span>
       </button>)}

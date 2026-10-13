@@ -1,3 +1,4 @@
+import { decodeWire } from '../src/protocol-wire';
 import { test, expect } from './deployment';
 import type { Page, WebSocketRoute } from '@playwright/test';
 const password = 'Test密碼2026!';
@@ -23,7 +24,7 @@ async function send(page: Page, text: string) {
 }
 
 test('TLS static deployment: account, offline contacts, private/group, unread, history, refresh, restart, backup/restore', async ({ browser, deployment, page }) => {
-  const alice = page; const bobContext = await browser.newContext({ ignoreHTTPSErrors: true }); const bob = await bobContext.newPage();
+  let alice = page; const bobContext = await browser.newContext({ ignoreHTTPSErrors: true }); const bob = await bobContext.newPage();
   const response = await alice.goto(deployment.url); expect(response?.status()).toBe(200);
   expect((await response?.securityDetails())?.protocol).toMatch(/TLS/);
   expect((await alice.request.get(deployment.url + '/api/health')).status()).toBe(200);
@@ -63,8 +64,9 @@ test('TLS static deployment: account, offline contacts, private/group, unread, h
   await expect(alice.getByRole('button', { name: '加载更早消息', exact: true })).toBeEnabled();
   await alice.getByRole('button', { name: '加载更早消息', exact: true }).click(); await expect(alice.locator('.bubble')).toContainText(['离线私聊：你好🌏']);
   const snapshot = deployment.backup(); await send(alice, '备份之后消息');
-  await deployment.restore(snapshot); await alice.evaluate(() => sessionStorage.removeItem('xim.recovery')); await alice.reload(); await expect(alice.locator('#self-id')).toHaveText(id!, { timeout: 30_000 });
+  await alice.close(); await bob.close(); await deployment.restore(snapshot); alice=await page.context().newPage(); await alice.goto(deployment.url); await expect(alice.locator('#self-id')).toHaveText(id!, { timeout: 30_000 });
   await contact(alice, '离线伙伴'); await expect(alice.locator('.bubble').filter({ hasText: '备份之后消息' })).toHaveCount(0);
+  await alice.getByRole('button',{name:'加载更早消息',exact:true}).click();
   await expect(alice.locator('.bubble').filter({ hasText: '在线回复' })).toHaveCount(1);
   await bobContext.close();
 });
@@ -91,8 +93,8 @@ test('real server: dropped and late receipt, repeated retry, disconnect catch-up
   await page.routeWebSocket('**/ws', ws => {
     if (offline) { void ws.close(); return; }
     route = ws; const server = ws.connectToServer();
-    ws.onMessage(message => { const data = JSON.parse(message.toString()); if (data.type === 'message') requests.push(data); server.send(message); });
-    server.onMessage(message => { const data = JSON.parse(message.toString()); if (data.type === 'sent' && !held) { held = message; return; } if (held && requests.length < 2 && ['history','conversations'].includes(data.type)) return; ws.send(message); });
+    ws.onMessage(message => { const data = decodeWire(new Uint8Array(message as Buffer), true); if (data.type === 'message') requests.push(data); server.send(message); });
+    server.onMessage(message => { const data = decodeWire(new Uint8Array(message as Buffer), false); if (data.type === 'sent' && !held) { held = message; return; } if (held && requests.length < 2 && ['history','conversations'].includes(data.type)) return; ws.send(message); });
   });
   const other = await browser.newContext({ ignoreHTTPSErrors: true }); const bob = await other.newPage();
   await register(bob, deployment.url, 'recipient'); await register(page, deployment.url, 'sender'); await login(page, 'sender'); await login(bob, 'recipient');
@@ -132,4 +134,43 @@ test('absolute session expiry and login failure limit are enforced by a real pro
     await expect(page.locator('#login-button')).toBeEnabled(); await expect(page.locator('#login-error')).toContainText('账号或密码错误');
   }
   await page.locator('#password').fill(password); await page.locator('#login-button').click(); await expect(page.locator('#login-error')).toContainText('频繁');
+});
+
+test('real SQLite sequences above 2^53 remain exact across binary receipts, sorting, cache, refresh and after replay', async ({ page, browser, deployment }) => {
+  const bobContext=await browser.newContext({ignoreHTTPSErrors:true});const bob=await bobContext.newPage();
+  await register(bob,deployment.url,'big_bob');await register(page,deployment.url,'big_alice');await login(page,'big_alice');
+  const base='9007199254740993',next='9007199254740994',last='9007199254740995';
+  deployment.seedLargeMessage('big_bob','big_alice',base);
+  const frames: Record<string,any>[]=[];
+  page.on('websocket',socket=>socket.on('framesent',event=> { if(Buffer.isBuffer(event.payload)) frames.push(decodeWire(new Uint8Array(event.payload),true)); }));
+  await contact(page,'big_bob');await expect(page.locator('.bubble').filter({hasText:'int64 精度基线'})).toHaveCount(1);
+  await send(page,'相邻序号一');await send(page,'相邻序号二');
+  await expect.poll(async()=>page.evaluate(()=>JSON.parse(sessionStorage.getItem('xim.recovery')!).conversations[0].messages.map((m:any)=>m.sequence))).toEqual([base,next,last]);
+  await expect.poll(async()=>page.evaluate(()=>JSON.parse(sessionStorage.getItem('xim.recovery')!).cursors[0]?.[1])).toBe(last);
+  await page.reload();await expect(page.locator('#self-name')).toHaveText('big_alice');
+  await expect.poll(()=>frames.filter(frame=>frame.type==='history'&&frame.after!==undefined).map(frame=>frame.after)).toContain(last);
+  await expect(page.locator('.bubble')).toContainText(['int64 精度基线','相邻序号一','相邻序号二']);
+  await bobContext.close();
+});
+
+test('bounded multi-part snapshots and 150-conversation recovery complete within production request limits', async ({ page, deployment }) => {
+  const responses:Record<string,any>[]=[];const sizes:number[]=[];
+  page.on('websocket',socket=>socket.on('framereceived',event=>{
+    if(Buffer.isBuffer(event.payload)){sizes.push(event.payload.length);const data=decodeWire(new Uint8Array(event.payload),false);if(data.type==='conversations')responses.push(data);}
+  }));
+  await register(page,deployment.url,'snapshot_owner');deployment.seedConversations(150);await login(page,'snapshot_owner');
+  await expect(page.locator('#list .conversation')).toHaveCount(150);await expect(page.locator('#list .unread')).toHaveCount(150);
+  expect(responses.some(response=>response.part===0&&response.hasMore===true)).toBe(true);expect(sizes.every(size=>size<=64*1024)).toBe(true);
+  const firstId=await page.locator('#self-id').textContent();await deployment.stopBackend();deployment.seedConversations(150,true);await deployment.startBackend();
+  await expect.poll(async()=>page.evaluate(()=> {
+    const cache=JSON.parse(sessionStorage.getItem('xim.recovery')||'null');return cache?.cursors?.filter((pair:any)=>pair[1]==='300').length||0;
+  }),{timeout:30_000}).toBe(150);
+  await expect(page.locator('#self-id')).toHaveText(firstId!);await expect(page.locator('#list .conversation')).toHaveCount(150);
+  await expect(page.locator('#list .unread')).toHaveText(Array(150).fill('2'));
+  await expect(page.locator('#list .conversation').first().locator('.preview')).toContainText('离线批次 149');
+  await page.reload();await expect(page.locator('#self-id')).toHaveText(firstId!);await expect(page.locator('#list .conversation')).toHaveCount(150);
+  await page.locator('#list .conversation').first().click();await expect(page.locator('.bubble')).toHaveCount(2);
+  expect(await page.locator('.bubble').last().textContent()).toHaveLength(4000);
+  await expect(page.locator('#list .unread')).toHaveCount(149);
+  expect(sizes.every(size=>size<=64*1024)).toBe(true);
 });

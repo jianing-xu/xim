@@ -58,7 +58,7 @@ public class SessionManager {
         if (Boolean.TRUE.equals(channel.attr(Attributes.WEB).get())) {
             var event = new com.alibaba.fastjson.JSONObject();
             event.put("type", "sessionInvalid"); event.put("code", code); event.put("reason", reason);
-            channel.writeAndFlush(new io.netty.handler.codec.http.websocketx.TextWebSocketFrame(event.toJSONString()))
+            channel.writeAndFlush(cn.xjn.xim.protobuf.ProtocolWire.webFrame(event, false))
                     .addListener(io.netty.channel.ChannelFutureListener.CLOSE);
         } else channel.close();
     }

@@ -1,3 +1,4 @@
+import type { Int64 } from './integers';
 export interface User { userId: string; username: string }
 export interface Contact extends User { displayName: string; online: boolean }
 export interface ContactDirectory {
@@ -19,7 +20,7 @@ export type ClientEvent =
   | { type: 'createGroup'; userIds: string[] }
   | { type: 'joinGroup' | 'members' | 'quitGroup'; groupId: string };
 
-export interface StoredMessage { sequence?: number; clientMessageId?: string; id: string; time: number; fromUserId: string; fromUsername: string; message: string }
+export interface StoredMessage { sequence?: Int64; clientMessageId?: string; id: string; time: number; fromUserId: string; fromUsername: string; message: string }
 
 export type ServerEvent =
   | { type: 'register' | 'changePassword'; success: boolean; reason?: string; requestId?: string }
@@ -29,26 +30,26 @@ export type ServerEvent =
   | { type: 'logout'; success: boolean }
   | { type: 'users'; users: User[] }
   | { type: 'contacts'; requestId: string; users: Contact[]; nextAfter: string | null; hasMore: boolean }
-  | { type: 'message'; fromUserId: string; fromUsername: string; message: string; requestId?: string; id?: string; time?: number; sequence?: number }
-  | { type: 'groupMessage'; fromGroupId: string; fromUserId: string; fromUser: string; message: string; requestId?: string; id?: string; time?: number; sequence?: number }
+  | { type: 'message'; fromUserId: string; fromUsername: string; message: string; requestId?: string; id?: string; time?: number; sequence?: Int64 }
+  | { type: 'groupMessage'; fromGroupId: string; fromUserId: string; fromUser: string; message: string; requestId?: string; id?: string; time?: number; sequence?: Int64 }
   | { type: 'createGroup' | 'joinGroup' | 'quitGroup'; success: boolean; groupId: string; reason?: string }
   | { type: 'members'; groupId: string; sessions: (User | null)[] }
-  | { type: 'sent'; requestId?: string; id?: string; time?: number; sequence?: number }
-  | { type: 'conversations'; conversations: ConversationSummary[]; syncCursor?: number }
-  | { type: 'read'; requestId: string; conversation: ConversationSummary; syncCursor: number }
-  | { type: 'history'; requestId: string; kind: 'user' | 'group'; id: string; messages: StoredMessage[]; nextBefore: string | null; hasMore: boolean; nextAfter?: string; syncCursor?: number }
+  | { type: 'sent'; requestId?: string; id?: string; time?: number; sequence?: Int64 }
+  | { type: 'conversations'; conversations: ConversationSummary[]; syncCursor?: Int64; snapshotId?: string; part?: number; hasMore?: boolean }
+  | { type: 'read'; requestId: string; conversation: ConversationSummary; syncCursor: Int64 }
+  | { type: 'history'; requestId: string; kind: 'user' | 'group'; id: string; messages: StoredMessage[]; nextBefore: string | null; hasMore: boolean; nextAfter?: string; syncCursor?: Int64 }
   | { type: 'error'; requestId?: string; reason: string }
   | { type: 'heartbeat' };
 
 export interface ConversationSummary {
   kind: 'user' | 'group'; id: string; name: string;
-  lastMessage?: StoredMessage; lastSequence?: number; lastTime?: number;
-  readSequence?: number; unread?: number;
+  lastMessage?: StoredMessage; lastSequence?: Int64; lastTime?: number;
+  readSequence?: Int64; unread?: Int64;
 }
 
 export interface Message {
   fromUserId?: string;
-  sequence?: number;
+  sequence?: Int64;
   id: string;
   time: number;
   mine: boolean;
@@ -65,9 +66,9 @@ export interface Conversation extends ConversationSummary {
   id: string;
   name: string;
   messages: Message[];
-  unread: number;
+  unread: Int64;
   draft: string;
-  summaryCursor?: number;
+  summaryCursor?: Int64;
   historyLoaded?: boolean;
   historyLoading?: boolean;
   hasMore?: boolean;
@@ -77,7 +78,7 @@ export interface Conversation extends ConversationSummary {
 export interface ChatState {
   restoring: boolean;
   syncing: boolean;
-  syncCursor: number;
+  syncCursor: Int64;
   connection: 'connecting' | 'online' | 'offline';
   session: User | null;
   users: User[];

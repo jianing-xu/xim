@@ -10,7 +10,7 @@ import lombok.Data;
 public abstract class Packet {
 
     // protocol version
-    private Byte version = 1;
+    private Byte version = 2;
 
     private String requestId;
 

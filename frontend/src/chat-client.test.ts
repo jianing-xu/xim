@@ -1,3 +1,4 @@
+import { encodeServerEvent, decodeClientEvent } from './protocol-wire';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ChatClient } from './chat-client';
 import type { ServerEvent } from './protocol';
@@ -9,8 +10,8 @@ class Socket extends EventTarget {
   sent: Record<string, unknown>[] = [];
   constructor(readonly url: string) { super(); Socket.instances.push(this); }
   open() { this.readyState = Socket.OPEN; this.dispatchEvent(new Event('open')); }
-  send(data: string) { this.sent.push(JSON.parse(data)); }
-  receive(data: ServerEvent) { this.dispatchEvent(new MessageEvent('message', { data: JSON.stringify(data) })); }
+  send(data: ArrayBuffer) { this.sent.push(decodeClientEvent(new Uint8Array(data))); }
+  receive(data: ServerEvent) { this.dispatchEvent(new MessageEvent('message', { data: new Uint8Array(encodeServerEvent(data)).buffer })); }
   close() { this.readyState = 3; this.dispatchEvent(new Event('close')); }
 }
 
@@ -112,7 +113,7 @@ describe('WebSocket chat lifecycle', () => {
     socket.receive({ type: 'groupMessage', fromGroupId: 'group', fromUserId: 'me', fromUser: 'root', message: '群聊 🌍', requestId: socket.sent.at(-1)!.requestId as string, id: 'group-db', time: 42 });
     socket.receive({ type: 'sent', requestId: socket.sent.at(-1)!.requestId as string });
     expect(chat().messages).toHaveLength(1);
-    socket.receive({ type: 'members', groupId: 'group', sessions: [null, { userId: 'me', username: 'root' }] });
+    socket.receive({ type: 'members', groupId: 'group', sessions: [{ userId: 'me', username: 'root' }] });
     expect(client.getSnapshot().members).toHaveLength(1);
     client.closeMembers();
     socket.receive({ type: 'quitGroup', success: true, groupId: 'group' });
@@ -408,7 +409,7 @@ describe('durable summaries and reading positions', () => {
 
   it('restores full offline unread counts, summaries and sequence order on a fresh page', () => {
     login();
-    socket.receive({ type: 'conversations', syncCursor: 90, conversations: [summary('peer', 65), summary('later', 90, 2)] });
+    socket.receive({ type: 'conversations', syncCursor: '90', conversations: [summary('peer', 65), summary('later', 90, 2)] });
     expect(client.getSnapshot().conversations.map(chat => chat.id)).toEqual(['later', 'peer']);
     expect(client.getSnapshot().conversations[1]).toMatchObject({ unread: 65, messages: [], lastMessage: { message: '摘要 65' } });
     recent();
@@ -417,16 +418,16 @@ describe('durable summaries and reading positions', () => {
     client.reportReading(chat().key, true, true);
     const read = reads().at(-1)!;
     expect(read.sequence).toBe('65'); expect(chat().unread).toBe(65);
-    socket.receive({ type: 'read', requestId: read.requestId as string, syncCursor: 90, conversation: summary('peer',65,0,65) });
-    expect(chat().unread).toBe(0); expect(chat().readSequence).toBe(65);
+    socket.receive({ type: 'read', requestId: read.requestId as string, syncCursor: '90', conversation: summary('peer',65,0,65) });
+    expect(chat().unread).toBe(0); expect(chat().readSequence).toBe('65');
     client.stop(); client = new ChatClient(() => 'ws://example.test/ws'); client.start();
     socket = Socket.instances.at(-1)!; socket.open(); login();
-    socket.receive({ type: 'conversations', syncCursor: 90, conversations: [summary('peer',65,0,65)] });
-    expect(client.getSnapshot().conversations[0]).toMatchObject({ unread: 0, readSequence: 65, messages: [] });
+    socket.receive({ type: 'conversations', syncCursor: '90', conversations: [summary('peer',65,0,65)] });
+    expect(client.getSnapshot().conversations[0]).toMatchObject({ unread: 0, readSequence: '65', messages: [] });
   });
 
   it('never clears while hidden, in the list, before rendering, or while browsing older messages', () => {
-    login(); socket.receive({ type: 'conversations', syncCursor: 65, conversations: [summary()] });
+    login(); socket.receive({ type: 'conversations', syncCursor: '65', conversations: [summary()] });
     recent();
     client.reportReading(chat().key, false, true); client.reportReading(chat().key, true, false);
     vi.stubGlobal('document', { visibilityState: 'hidden' }); client.reportReading(chat().key, true, true);
@@ -440,15 +441,15 @@ describe('durable summaries and reading positions', () => {
   });
 
   it('counts live and duplicate messages once and excludes own private/group sends', () => {
-    login(); socket.receive({ type: 'conversations', syncCursor: 65, conversations: [summary()] });
+    login(); socket.receive({ type: 'conversations', syncCursor: '65', conversations: [summary()] });
     const incoming: ServerEvent = { type: 'message', fromUserId: 'peer', fromUsername: 'peer', message: 'new', id: 'new', sequence: 66, time: 100 };
     socket.receive(incoming); socket.receive(incoming);
-    expect(client.getSnapshot().conversations[0]).toMatchObject({ unread: 66, lastSequence: 66, lastMessage: { message: 'new' } });
+    expect(client.getSnapshot().conversations[0]).toMatchObject({ unread: 66, lastSequence: '66', lastMessage: { message: 'new' } });
     recent(66); client.setDraft('mine'); client.sendMessage();
     const send = socket.sent.at(-1)!;
     socket.receive({ type: 'sent', requestId: send.requestId as string, id: 'own', sequence: 67, time: 1 });
     socket.receive({ type: 'sent', requestId: send.requestId as string, id: 'own', sequence: 67, time: 1 });
-    expect(chat().unread).toBe(66); expect(chat().lastSequence).toBe(67);
+    expect(chat().unread).toBe(66); expect(chat().lastSequence).toBe('67');
     socket.receive({ type: 'groupMessage', fromGroupId: 'g', fromUserId: 'me', fromUser: 'root', message: 'own group', sequence: 68, id: 'g-own', time: 1 });
     const group = client.getSnapshot().conversations.find(chat => chat.id === 'g')!;
     expect(group.unread).toBe(0); expect(client.getSnapshot().conversations[0].id).toBe('g');
@@ -460,47 +461,47 @@ describe('durable summaries and reading positions', () => {
   it('merges an initial late snapshot baseline with pushes beyond its cursor', () => {
     login();
     socket.receive({ type: 'message', fromUserId: 'peer', fromUsername: 'peer', message: 'eleven', id: 'm11', sequence: 11, time: 11 });
-    socket.receive({ type: 'conversations', syncCursor: 10, conversations: [summary('peer',10,3)] });
-    expect(client.getSnapshot().conversations[0]).toMatchObject({ unread: 4, lastSequence: 11, lastMessage: { message: 'eleven' }, readSequence: 0 });
+    socket.receive({ type: 'conversations', syncCursor: '10', conversations: [summary('peer',10,3)] });
+    expect(client.getSnapshot().conversations[0]).toMatchObject({ unread: 4, lastSequence: '11', lastMessage: { message: 'eleven' }, readSequence: '0' });
     expect(socket.sent.at(-1)?.type).toBe('conversations');
-    socket.receive({ type: 'conversations', syncCursor: 11, conversations: [summary('peer',11,4)] });
+    socket.receive({ type: 'conversations', syncCursor: '11', conversations: [summary('peer',11,4)] });
     expect(client.getSnapshot().conversations[0].unread).toBe(4);
-    socket.receive({ type: 'conversations', syncCursor: 10, conversations: [summary('peer',10,3)] });
+    socket.receive({ type: 'conversations', syncCursor: '10', conversations: [summary('peer',10,3)] });
     expect(client.getSnapshot().conversations[0].unread).toBe(4);
   });
 
   it('retains a push after a reading snapshot and ignores older reading updates', () => {
-    login(); socket.receive({ type: 'conversations', syncCursor: 10, conversations: [summary('peer',10,3)] });
+    login(); socket.receive({ type: 'conversations', syncCursor: '10', conversations: [summary('peer',10,3)] });
     recent(10); client.reportReading(chat().key,true,true); const read=reads().at(-1)!;
     socket.receive({ type: 'message', fromUserId: 'peer', fromUsername: 'peer', message: 'eleven', id: 'm11', sequence: 11, time: 11 });
-    socket.receive({ type: 'conversations', syncCursor: 11, conversations: [{ ...summary('peer',11,4,0), lastMessage: { ...summary('peer',11,4,0).lastMessage, message: 'eleven' } }] });
-    socket.receive({ type: 'read', requestId: read.requestId as string, syncCursor: 10, conversation: summary('peer',10,0,10) });
-    expect(chat()).toMatchObject({ unread: 1, readSequence: 10, lastSequence: 11, lastMessage: { message: 'eleven' } });
-    socket.receive({ type: 'conversations', syncCursor: 11, conversations: [summary('peer',11,4,0)] });
-    expect(chat()).toMatchObject({ unread: 1, readSequence: 10 });
-    socket.receive({ type: 'conversations', syncCursor: 11, conversations: [summary('peer',11,1,10)] });
+    socket.receive({ type: 'conversations', syncCursor: '11', conversations: [{ ...summary('peer',11,4,0), lastMessage: { ...summary('peer',11,4,0).lastMessage, message: 'eleven' } }] });
+    socket.receive({ type: 'read', requestId: read.requestId as string, syncCursor: '10', conversation: summary('peer',10,0,10) });
+    expect(chat()).toMatchObject({ unread: 1, readSequence: '10', lastSequence: '11', lastMessage: { message: 'eleven' } });
+    socket.receive({ type: 'conversations', syncCursor: '11', conversations: [summary('peer',11,4,0)] });
+    expect(chat()).toMatchObject({ unread: 1, readSequence: '10' });
+    socket.receive({ type: 'conversations', syncCursor: '11', conversations: [summary('peer',11,1,10)] });
     client.reportReading(chat().key,true,true); const next=reads().at(-1)!;
-    socket.receive({ type: 'read', requestId: next.requestId as string, syncCursor: 11, conversation: summary('peer',11,0,11) });
-    socket.receive({ type: 'read', requestId: read.requestId as string, syncCursor: 10, conversation: summary('peer',10,0,10) });
-    expect(chat()).toMatchObject({ unread: 0, readSequence: 11, lastSequence: 11 });
+    socket.receive({ type: 'read', requestId: next.requestId as string, syncCursor: '11', conversation: summary('peer',11,0,11) });
+    socket.receive({ type: 'read', requestId: read.requestId as string, syncCursor: '10', conversation: summary('peer',10,0,10) });
+    expect(chat()).toMatchObject({ unread: 0, readSequence: '11', lastSequence: '11' });
   });
 
   it('does not count pagination or snapshot-covered pushes twice and refreshes a missing tail', () => {
-    login(); socket.receive({ type: 'conversations', syncCursor: 65, conversations: [summary()] }); recent();
+    login(); socket.receive({ type: 'conversations', syncCursor: '65', conversations: [summary()] }); recent();
     socket.receive({ type: 'message', fromUserId: 'peer', fromUsername: 'peer', message: 'known', id: 'm64', sequence: 64, time: 64 });
     expect(chat().unread).toBe(65);
     client.loadHistory(chat().key); const older=socket.sent.at(-1)!;
     socket.receive({ type: 'history', requestId: older.requestId as string, kind: 'user', id: 'peer', hasMore: false, nextBefore: '1',
       messages: [{ id: 'm1', sequence: 1, time: 1, fromUserId: 'peer', fromUsername: 'peer', message: 'old' }] });
-    expect(chat().unread).toBe(65); expect(chat().lastSequence).toBe(65);
-    socket.receive({ type: 'conversations', syncCursor: 80, conversations: [summary('peer',80,80)] });
+    expect(chat().unread).toBe(65); expect(chat().lastSequence).toBe('65');
+    socket.receive({ type: 'conversations', syncCursor: '80', conversations: [summary('peer',80,80)] });
     expect(socket.sent.at(-1)).toMatchObject({ type: 'history', id: 'peer' });
     expect(socket.sent.at(-1)?.before).toBeUndefined();
     client.reportReading(chat().key,true,true); expect(reads()).toHaveLength(0);
   });
 
   it('keeps unread on read failures/timeouts and clears pending reading on account changes', () => {
-    login(); socket.receive({ type: 'conversations', syncCursor: 65, conversations: [summary()] }); recent();
+    login(); socket.receive({ type: 'conversations', syncCursor: '65', conversations: [summary()] }); recent();
     client.reportReading(chat().key,true,true); const read=reads().at(-1)!;
     socket.receive({ type: 'error', requestId: read.requestId as string, reason: '请先加入该群组' });
     expect(chat().unread).toBe(65); expect(client.getSnapshot().toast).toContain('加入');
@@ -508,7 +509,7 @@ describe('durable summaries and reading positions', () => {
     expect(chat().unread).toBe(65); expect(client.getSnapshot().toast).toContain('阅读位置同步超时');
     client.reportReading(chat().key,true,true); const pending=reads().at(-1)!;
     socket.receive({ type: 'logout', success: true }); login();
-    socket.receive({ type: 'read', requestId: pending.requestId as string, syncCursor: 65, conversation: summary('peer',65,0,65) });
+    socket.receive({ type: 'read', requestId: pending.requestId as string, syncCursor: '65', conversation: summary('peer',65,0,65) });
     expect(client.getSnapshot().conversations).toHaveLength(0);
   });
 });

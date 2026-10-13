@@ -78,7 +78,7 @@ public class PacketCodecValidationTest {
     }
 
     private ByteBuf header(int magic, int length) {
-        return Unpooled.buffer().writeInt(magic).writeByte(1)
+        return Unpooled.buffer().writeInt(magic).writeByte(2)
                 .writeByte(Serializer.DEFAULT.getSerializerAlgorithm())
                 .writeByte(new HeartbeatRequestPacket().getCommand()).writeInt(length);
     }

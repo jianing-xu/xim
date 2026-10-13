@@ -1,7 +1,7 @@
 #!/usr/bin/env sh
 set -eu
 cd "$(dirname "$0")/.."
-mvn verify
+mvn clean verify
 (cd frontend && npm ci && npm test && npm run build)
 mvn -f backend/pom.xml dependency:copy-dependencies -DincludeScope=runtime -DoutputDirectory=target/release/lib
 mkdir -p backend/target/release

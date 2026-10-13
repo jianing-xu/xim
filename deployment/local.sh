@@ -11,6 +11,7 @@ if [ ! -f "$XIM_LOCAL_DATA/cert.pem" ]; then
       -addext 'subjectAltName=DNS:localhost,IP:127.0.0.1' \
       -keyout "$XIM_LOCAL_DATA/key.pem" -out "$XIM_LOCAL_DATA/cert.pem"
 fi
+export XIM_DB_TYPE=sqlite
 export XIM_RELEASE_DIR="$PWD/backend/target/release"
 export XIM_DB_SQLITE_PATH="$XIM_LOCAL_DATA/xim.db"
 export XIM_LOG_DIR="$XIM_LOCAL_DATA/logs"
@@ -29,10 +30,10 @@ trap cleanup EXIT
 trap 'exit 0' INT TERM
 for XIM_LOCAL_ATTEMPT in 1 2 3 4 5 6 7 8 9 10; do
     if ! kill -0 "$XIM_LOCAL_BACKEND_PID" 2>/dev/null; then exit 1; fi
-    if curl --fail --silent "$XIM_BACKEND_URL/api/health" >/dev/null; then break; fi
+    if curl --noproxy '*' --fail --silent "$XIM_BACKEND_URL/api/health" >/dev/null; then break; fi
     sleep 1
 done
-curl --fail --silent "$XIM_BACKEND_URL/api/health" >/dev/null
+curl --noproxy '*' --fail --silent "$XIM_BACKEND_URL/api/health" >/dev/null
 node deployment/static-server.mjs &
 XIM_LOCAL_STATIC_PID=$!
 printf '%s\n' "Open $XIM_ALLOWED_ORIGINS (local self-signed certificate; no system trust changed)"

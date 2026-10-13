@@ -1,3 +1,5 @@
+import { compareInt, maxInt, positive, count, integer, MAX_INT64, type Int64 } from './integers';
+import { encodeClientEvent, decodeServerEvent, normalizeCache, MAX_FRAME_BYTES } from './protocol-wire';
 import type { ChatState, ClientEvent, Conversation, ConversationSummary, Message, ServerEvent } from './protocol';
 
 interface Pending {
@@ -43,7 +45,7 @@ export class ChatClient {
   private chatOwner: string | null = null;
   private historyPending = new Map<string, { key: string; timer: ReturnType<typeof setTimeout> }>();
 
-  private readPending = new Map<string, { key: string; sequence: number; timer: ReturnType<typeof setTimeout> }>();
+  private readPending = new Map<string, { key: string; sequence: Int64; timer: ReturnType<typeof setTimeout> }>();
 
   private clearReads() {
     this.readPending.forEach(entry => clearTimeout(entry.timer)); this.readPending.clear();
@@ -58,27 +60,38 @@ export class ChatClient {
   private connectTimer?: ReturnType<typeof setTimeout>;
   private snapshotTimer?: ReturnType<typeof setTimeout>;
   private credentialRequest?: AbortController;
-  private syncCursors = new Map<string, number>();
-  private syncPending = new Map<string, { key: string; after: number; timer: ReturnType<typeof setTimeout> }>();
+  private syncCursors = new Map<string, Int64>();
+  private syncPending = new Map<string, { key: string; after: Int64; timer: ReturnType<typeof setTimeout> }>();
   private syncQueue: string[] = [];
-  private syncTarget = 0;
+  private syncTarget: Int64 = 0;
   private recoverySnapshot = false;
+  private snapshotAssembly?: { id:string; nextPart:number; cursor:Int64; conversations:ConversationSummary[]; timer:ReturnType<typeof setTimeout> };
+  private syncThrottle?: ReturnType<typeof setTimeout>;
+  private lastSyncRequest?: number;
 
   constructor(private readonly url: () => string = websocketUrl) {
     try {
-      const cached = JSON.parse(sessionStorage.getItem('xim.recovery') || 'null');
+      const cached = normalizeCache(JSON.parse(sessionStorage.getItem('xim.recovery') || 'null'));
       this.logoutPending = localStorage.getItem('xim.logoutPending') === 'true';
       this.restoreBlocked = sessionStorage.getItem('xim.restoreBlocked') === 'true' || this.logoutPending;
       if (this.restoreBlocked) this.state.loginError = sessionStorage.getItem('xim.restoreReason') || '';
       if (cached && typeof cached.owner === 'string' && Array.isArray(cached.conversations)) {
+        const cursors = new Map<string, Int64>((cached.cursors || []).map((entry: unknown) => {
+          if (!Array.isArray(entry) || entry.length !== 2 || typeof entry[0] !== 'string') throw new Error('Invalid cached cursor');
+          const value = integer(entry[1]); if (value < 0n) throw new Error('Invalid cached cursor');
+          return [entry[0], value.toString()];
+        }));
         this.chatOwner = cached.owner;
         this.connectionId = typeof cached.connectionId === 'string' ? cached.connectionId : undefined;
         this.state = { ...this.state, conversations: cached.conversations.map((chat: Conversation) => ({ ...chat, historyLoading: false })),
           current: cached.current, showChat: Boolean(cached.showChat) };
-        this.syncCursors = new Map(cached.cursors || []);
+        this.syncCursors = cursors;
         for (const [id, entry] of cached.pending || []) this.pending.set(id,{ ...entry, phase: entry.phase === 'failed' ? 'failed' : 'unknown' });
       }
-    } catch { /* Optional per-tab cache; authorization always comes from the server. */ }
+    } catch {
+      this.chatOwner = null; this.syncCursors.clear(); this.pending.clear(); this.state = initialState();
+      try { sessionStorage.removeItem('xim.recovery'); } catch { /* Optional cache. */ }
+    }
   }
 
   private persist() {
@@ -97,6 +110,8 @@ export class ChatClient {
   }
 
   private clearSync() {
+    clearTimeout(this.syncThrottle); this.syncThrottle=undefined; this.lastSyncRequest=undefined;
+    clearTimeout(this.snapshotAssembly?.timer);this.snapshotAssembly=undefined;
     clearTimeout(this.snapshotTimer);
     this.syncPending.forEach(entry => clearTimeout(entry.timer)); this.syncPending.clear(); this.syncQueue = [];
     this.patch({ syncing: false });
@@ -208,6 +223,7 @@ export class ChatClient {
     if (this.stopped) return;
     this.patch({ connection: 'connecting' });
     const socket = new WebSocket(this.url());
+    socket.binaryType = 'arraybuffer';
     this.socket = socket;
     const active = () => !this.stopped && this.socket === socket;
     clearTimeout(this.connectTimer);
@@ -229,11 +245,32 @@ export class ChatClient {
         if (this.state.session && !this.state.restoring && !this.state.syncing) { this.send({ type: 'users' }); this.send({ type: 'conversations' }); }
       }, 5000);
     });
+    const incoming: unknown[] = []; let waiting = false;
+    const accept = (data: unknown) => {
+      if (!active()) return;
+      try {
+        const bytes = data instanceof ArrayBuffer ? new Uint8Array(data) : data instanceof Uint8Array ? data : null;
+        if (!bytes) throw new Error('Expected binary frame');
+        this.lastResponse = Date.now(); this.receive(decodeServerEvent(bytes));
+      } catch { this.notify('无法处理收到的协议消息，正在重新连接'); this.disconnect(socket); }
+    };
+    const drain = () => {
+      if (waiting || !active()) return;
+      while (incoming.length) {
+        const data = incoming.shift();
+        if (typeof Blob !== 'undefined' && data instanceof Blob) {
+          if(data.size>MAX_FRAME_BYTES) {this.disconnect(socket);return;}
+          waiting = true;
+          void data.arrayBuffer().then(accept).catch(() => this.disconnect(socket)).finally(() => { waiting = false; drain(); });
+          return;
+        }
+        accept(data); if (!active()) return;
+      }
+    };
     socket.addEventListener('message', event => {
       if (!active()) return;
-      this.lastResponse = Date.now();
-      try { this.receive(JSON.parse(event.data) as ServerEvent); }
-      catch { this.notify('无法处理收到的消息，请刷新页面重试'); }
+      if (incoming.length >= 128) { this.disconnect(socket); return; }
+      incoming.push(event.data); drain();
     });
     socket.addEventListener('close', () => {
       if (active()) this.disconnected(socket);
@@ -271,7 +308,7 @@ export class ChatClient {
       this.notify('连接已断开，请等待连接恢复');
       return false;
     }
-    this.socket.send(JSON.stringify(event));
+    this.socket.send(new Uint8Array(encodeClientEvent(event)).buffer);
     return true;
   }
 
@@ -351,7 +388,7 @@ export class ChatClient {
 
   private updateChat(key: string, fields: Partial<Conversation>) {
     this.patch({ conversations: this.state.conversations.map(chat => chat.key === key ? { ...chat, ...fields } : chat)
-      .sort((a, b) => (b.lastSequence ?? 0) - (a.lastSequence ?? 0) || a.key.localeCompare(b.key)) });
+      .sort((a, b) => compareInt(b.lastSequence, a.lastSequence) || a.key.localeCompare(b.key)) });
   }
 
   choose(kind: Conversation['kind'], id: string, name?: string) {
@@ -386,8 +423,8 @@ export class ChatClient {
       || this.state.tab !== 'conversations' || this.state.current !== key
       || typeof document !== 'undefined' && document.visibilityState !== 'visible'
       || !chat.historyLoaded || chat.historyLoading) return;
-    const sequence = Math.max(0, ...chat.messages.map(message => message.sequence ?? 0));
-    if (!sequence || sequence < (chat.lastSequence ?? 0) || sequence <= (chat.readSequence ?? 0)
+    const sequence = maxInt(...chat.messages.map(message => message.sequence));
+    if (!positive(sequence) || compareInt(sequence, chat.lastSequence) < 0 || compareInt(sequence, chat.readSequence) <= 0
       || [...this.readPending.values()].some(entry => entry.key === key)) return;
     const requestId = messageId();
     if (!this.send({ type: 'read', kind: chat.kind, id: chat.id, sequence: String(sequence), requestId })) return;
@@ -396,35 +433,35 @@ export class ChatClient {
     }, 8000) });
   }
 
-  private applySummary(summary: ConversationSummary, cursor: number) {
+  private applySummary(summary: ConversationSummary, cursor: Int64) {
     const chat = this.conversation(summary.kind, summary.id, summary.name);
     const readSequence = summary.readSequence ?? chat.readSequence ?? 0;
     // An older baseline must not undo a newer snapshot or confirmed reading position.
-    if (cursor < (chat.summaryCursor ?? 0) && readSequence <= (chat.readSequence ?? 0)
-      || readSequence < (chat.readSequence ?? 0)) {
+    if (compareInt(cursor, chat.summaryCursor) < 0 && compareInt(readSequence, chat.readSequence) <= 0
+      || compareInt(readSequence, chat.readSequence) < 0) {
       this.send({ type: 'conversations' }); return;
     }
-    const newer = (chat.lastSequence ?? 0) > cursor;
-    const increments = new Set(chat.messages.filter(message => !message.mine && (message.sequence ?? 0) > cursor
-      && (message.sequence ?? 0) > readSequence).map(message => message.sequence)).size;
-    this.updateChat(chat.key, { name: summary.name, summaryCursor: Math.max(cursor, chat.summaryCursor ?? 0), readSequence,
-      unread: summary.unread === undefined ? chat.unread : summary.unread + increments,
+    const newer = compareInt(chat.lastSequence, cursor) > 0;
+    const increments = new Set(chat.messages.filter(message => !message.mine && compareInt(message.sequence, cursor) > 0
+      && compareInt(message.sequence, readSequence) > 0).map(message => message.sequence)).size;
+    this.updateChat(chat.key, { name: summary.name, summaryCursor: maxInt(cursor, chat.summaryCursor), readSequence,
+      unread: summary.unread === undefined ? chat.unread : count(summary.unread, increments),
       ...(!newer ? { lastSequence: summary.lastSequence ?? chat.lastSequence,
         lastTime: summary.lastTime ?? chat.lastTime, lastMessage: summary.lastMessage ?? chat.lastMessage } : {}) });
     // Known deltas give an immediate count; a fresh server snapshot also covers pushes lost in transit.
     if (newer) this.send({ type: 'conversations' });
     if (!this.state.syncing && !this.state.restoring && this.state.current === chat.key && this.state.showChat && chat.historyLoaded && !chat.historyLoading
-      && (summary.lastSequence ?? 0) > Math.max(0, ...chat.messages.map(message => message.sequence ?? 0)))
+      && compareInt(summary.lastSequence, maxInt(...chat.messages.map(message => message.sequence))) > 0)
       this.loadHistory(chat.key, true);
   }
 
   private committedFields(chat: Conversation, message: Message): Partial<Conversation> {
-    if (!message.sequence || message.sequence <= (chat.lastSequence ?? 0)) return {};
+    if (!positive(message.sequence) || compareInt(message.sequence, chat.lastSequence) <= 0) return {};
     return { lastSequence: message.sequence, lastTime: message.time,
       lastMessage: { id: message.id, sequence: message.sequence, time: message.time,
         fromUserId: message.fromUserId ?? (message.mine ? this.state.session!.userId : chat.kind === 'user' ? chat.id : ''),
         fromUsername: message.name, message: message.text },
-      unread: chat.unread + (!message.mine && message.sequence > (chat.readSequence ?? 0) ? 1 : 0) };
+      unread: count(chat.unread, !message.mine && compareInt(message.sequence, chat.readSequence) > 0 ? 1 : 0) };
   }
 
   switchTab(tab: ChatState['tab']) {
@@ -489,7 +526,7 @@ export class ChatClient {
     if (chat.messages.some(item => item.id === message.id)) return message;
     this.updateChat(chat.key, { messages: [...chat.messages, message],
       ...this.committedFields(chat, message),
-      ...(!message.sequence ? { unread: chat.unread + (!message.mine ? 1 : 0) } : {}) });
+      ...(!message.sequence ? { unread: count(chat.unread, !message.mine ? 1 : 0) } : {}) });
     return message;
   }
 
@@ -534,7 +571,7 @@ export class ChatClient {
     return false;
   }
 
-  private finishPending(id: string, error?: string, saved?: { id?: string; time?: number; sequence?: number }, phase: Pending['phase'] = 'failed') {
+  private finishPending(id: string, error?: string, saved?: { id?: string; time?: number; sequence?: Int64 }, phase: Pending['phase'] = 'failed') {
     const pending = this.pending.get(id);
     if (!pending || (error && pending.phase === 'sent')) return;
     clearTimeout(pending.timer);
@@ -549,7 +586,7 @@ export class ChatClient {
         // History or broadcast may already contain the committed row. Keep only the corrected local row.
         this.updateChat(chat.key, { ...this.committedFields(chat, corrected), messages: chat.messages
           .filter(message => message === own || message.id !== corrected.id)
-          .map(message => message === own ? corrected : message).sort((a, b) => a.sequence && b.sequence ? a.sequence - b.sequence : a.time - b.time) });
+          .map(message => message === own ? corrected : message).sort((a, b) => positive(a.sequence) && positive(b.sequence) ? compareInt(a.sequence, b.sequence) : a.time - b.time) });
       }
     }
     if (error && !this.stopped) this.notify(error);
@@ -567,7 +604,10 @@ export class ChatClient {
     this.syncPage(key, this.syncCursors.get(key) ?? 0);
   }
 
-  private syncPage(key: string, after: number) {
+  private syncPage(key: string, after: Int64) {
+    const wait=this.lastSyncRequest===undefined?0:Math.max(0,50-(Date.now()-this.lastSyncRequest));
+    if(wait>0) {clearTimeout(this.syncThrottle);this.syncThrottle=setTimeout(()=>{this.syncThrottle=undefined;this.syncPage(key,after);},wait);return;}
+    this.lastSyncRequest=Date.now();
     const chat = this.state.conversations.find(chat => chat.key === key);
     if (!chat) { this.nextSync(); return; }
     const requestId = messageId();
@@ -592,13 +632,13 @@ export class ChatClient {
       fromUserId:message.fromUserId,clientMessageId:message.clientMessageId,mine:message.fromUserId===this.state.session?.userId,
       name:message.fromUsername,text:message.message,...(message.fromUserId===this.state.session?.userId?{status:'已发送'}:{}) }));
     const merged = new Map([...history,...current.messages].map(message => [message.id,message]));
-    this.updateChat(chat.key,{messages:[...merged.values()].sort((a,b)=>(a.sequence ?? Infinity)-(b.sequence ?? Infinity) || a.time-b.time)});
-    const next = Number(data.nextAfter ?? Math.max(pending.after,...data.messages.map(message=>message.sequence ?? 0)));
+    this.updateChat(chat.key,{messages:[...merged.values()].sort((a,b)=>compareInt(a.sequence ?? MAX_INT64, b.sequence ?? MAX_INT64) || a.time-b.time)});
+    const next = data.nextAfter ?? maxInt(pending.after,...data.messages.map(message=>message.sequence));
     if (data.hasMore) {
-      if (!Number.isSafeInteger(next) || next <= pending.after) { this.socket && this.disconnect(this.socket); return; }
+      if (!positive(next) || compareInt(next, pending.after) <= 0) { this.socket && this.disconnect(this.socket); return; }
       this.syncPage(pending.key,next);
     } else {
-      this.syncCursors.set(pending.key,Math.max(pending.after,next,this.syncTarget,data.syncCursor ?? 0));
+      this.syncCursors.set(pending.key,maxInt(pending.after,next,this.syncTarget,data.syncCursor));
       this.persist(); this.nextSync();
     }
   }
@@ -647,9 +687,25 @@ export class ChatClient {
         break;
       case 'conversations':
         if (!this.state.session) return;
-        data.conversations.forEach(chat => this.applySummary(chat, data.syncCursor ?? Number.MAX_SAFE_INTEGER));
+        if(data.snapshotId!==undefined) {
+          if(data.part===0) {
+            clearTimeout(this.snapshotAssembly?.timer);
+            this.snapshotAssembly={id:data.snapshotId,nextPart:0,cursor:data.syncCursor??0,conversations:[],timer:setTimeout(()=>{
+              this.notify('会话快照未收齐，正在重新连接');if(this.socket)this.disconnect(this.socket);
+            },8000)};
+          }
+          const assembly=this.snapshotAssembly;
+          if(!assembly||assembly.id!==data.snapshotId||data.part!==assembly.nextPart||compareInt(data.syncCursor,assembly.cursor)!==0||typeof data.hasMore!=='boolean') {
+            if(this.socket)this.disconnect(this.socket);return;
+          }
+          assembly.conversations.push(...data.conversations);assembly.nextPart++;
+          if(data.hasMore) return;
+          clearTimeout(assembly.timer);this.snapshotAssembly=undefined;
+          this.receive({type:'conversations',conversations:assembly.conversations,syncCursor:assembly.cursor});return;
+        }
+        data.conversations.forEach(chat => this.applySummary(chat, data.syncCursor ?? MAX_INT64));
         // Snapshot version for summary merging; replay frontiers live only in syncCursors.
-        this.patch({ syncCursor: Math.max(this.state.syncCursor, data.syncCursor ?? 0) });
+        this.patch({ syncCursor: maxInt(this.state.syncCursor, data.syncCursor) });
         if (this.recoverySnapshot) {
           clearTimeout(this.snapshotTimer);
           const allowedGroups = new Set(data.conversations.filter(chat => chat.kind === 'group').map(chat => `group:${chat.id}`));
@@ -692,7 +748,7 @@ export class ChatClient {
           mine: message.fromUserId === this.state.session?.userId, name: message.fromUsername,
           text: message.message, ...(message.fromUserId === this.state.session?.userId ? { status: '已发送' } : {}) }));
         const merged = new Map([...history, ...chat.messages].map(message => [message.id, message]));
-        this.updateChat(chat.key, { messages: [...merged.values()].sort((a, b) => a.sequence && b.sequence ? a.sequence - b.sequence : a.time - b.time),
+        this.updateChat(chat.key, { messages: [...merged.values()].sort((a, b) => positive(a.sequence) && positive(b.sequence) ? compareInt(a.sequence, b.sequence) : a.time - b.time),
           historyLoaded: true, historyLoading: false, hasMore: data.hasMore, nextBefore: data.nextBefore });
         break;
       }

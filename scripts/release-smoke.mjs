@@ -36,20 +36,40 @@ async function start() {
   throw new Error('Release deployment health timeout');
 }
 try {
+  const migrationSource=globalThis.process.env.XIM_MIGRATION_DB;
+  if(migrationSource) await run('python3',[join(root,'scripts/sqlite-backup.py'),migrationSource,join(dir,'xim.db')]);
   await start(); browser = await chromium.launch({ channel: globalThis.process.env.XIM_BROWSER_CHANNEL || 'chrome' });
   const context = await browser.newContext({ ignoreHTTPSErrors: true }); let page = await context.newPage();
-  await page.goto(url); await page.locator('#register-toggle').click();
-  await page.locator('#username').fill('release_smoke'); await page.locator('#password').fill('Release密碼2026!');
-  await page.locator('#login-button').click(); await page.locator('#login-title').filter({ hasText: '登录，开始聊天' }).waitFor();
-  await page.locator('#password').fill('Release密碼2026!'); await page.locator('#login-button').click();
+  await page.goto(url);
+  if(!migrationSource) {
+    await page.locator('#register-toggle').click();await page.locator('#username').fill('release_smoke');await page.locator('#password').fill('Release密碼2026!');
+    await page.locator('#login-button').click();await page.locator('#login-title').filter({hasText:'登录，开始聊天'}).waitFor();
+  }
+  await page.locator('#username').fill('release_smoke');await page.locator('#password').fill('Release密碼2026!');await page.locator('#login-button').click();
   await page.locator('#self-id').waitFor(); const id = await page.locator('#self-id').textContent();
-  await page.locator('#new-group').click(); await page.locator('#group-form button[type=submit]').click();
+  if(migrationSource) {
+    await page.locator('#list .conversation').first().click();await page.locator('.bubble').filter({hasText:'发布包持久化 🧪'}).first().waitFor();
+    const expected=JSON.parse((await run('python3',['-c',`import sqlite3,sys,json
+with sqlite3.connect(sys.argv[1]) as db:
+ user=db.execute("SELECT user_id FROM xim_users WHERE username='release_smoke'").fetchone()[0]
+ row=db.execute("SELECT message_id,seq,sent_at FROM xim_messages ORDER BY seq LIMIT 1").fetchone()
+ print(json.dumps({'userId':user,'messageId':row[0],'sequence':str(row[1]),'time':row[2]}))
+`,migrationSource])).stdout);
+    if(id!==expected.userId)throw new Error('V6 identity changed during Protobuf upgrade');
+    await page.waitForFunction(expected=>{
+      const cache=JSON.parse(sessionStorage.getItem('xim.recovery')||'null');
+      return cache?.conversations?.some(chat=>chat.messages.some(message=>message.id===expected.messageId&&message.sequence===expected.sequence&&message.time===expected.time));
+    },expected);
+  } else {await page.locator('#new-group').click();await page.locator('#group-form button[type=submit]').click();}
   await page.locator('#message').fill('发布包持久化 🧪'); await page.locator('#send').click();
-  await page.locator('.message-status').filter({ hasText: '已发送' }).waitFor();
+  await page.locator('.message-status').filter({ hasText: '已发送' }).last().waitFor();
+  let cookie;
+  for(let i=0;i<50;i++) {cookie=(await context.cookies()).find(value=>value.name==='__Host-xim_session');if(cookie)break;await new Promise(r=>setTimeout(r,100));}
+  if(!cookie?.secure||!cookie.httpOnly||cookie.sameSite!=='Strict')throw new Error('Secure Cookie attributes missing');
   await run('python3', [join(root, 'scripts/sqlite-backup.py'), join(dir, 'xim.db'), join(dir, 'snapshot.db')]);
   await page.close(); await stop(); await start(); page = await context.newPage(); await page.goto(url);
   await page.locator('#self-id').waitFor(); if (await page.locator('#self-id').textContent() !== id) throw new Error('Identity changed across release restart');
-  await page.locator('#list .conversation').first().click(); await page.locator('.bubble').filter({ hasText: '发布包持久化 🧪' }).waitFor();
+  await page.locator('#list .conversation').first().click(); await page.locator('.bubble').filter({ hasText: '发布包持久化 🧪' }).first().waitFor();
   await page.screenshot({ path: join(dir, 'release-browser.png') });
-  console.log(JSON.stringify({ status: 'passed', dir, url, stableUserId: id, checks: ['release bundle', 'start-backend.sh', 'local.sh', 'trusted CA curl', 'HTTPS/WSS browser', 'Secure Cookie', 'group message', 'online backup', 'restart persistence'] }));
+  console.log(JSON.stringify({ status: 'passed', dir, url, migrationSource: migrationSource || null, stableUserId: id, checks: ['release bundle', 'start-backend.sh', 'local.sh', 'trusted CA curl', 'HTTPS/WSS browser', 'Secure Cookie', 'group message', 'online backup', 'restart persistence'] }));
 } finally { await browser?.close(); await stop(); }

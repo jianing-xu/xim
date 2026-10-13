@@ -293,3 +293,7 @@ node scripts/release-smoke.mjs
 新增生产保护：TCP/HTTP 共享连接上限 512、握手前 15 秒读取超时、每连接 30 请求/秒和 60 突发、TCP 1 MiB/WS 64 KiB 帧上限。批量网络测试按 75ms/两条请求节奏运行，未放宽生产限流；超限关闭连接，已提交消息通过重试和补拉恢复。
 
 2026-10-13 部署阶段验证：136 项后端单元测试、32 项集成测试通过，1 项 PostgreSQL 未配置跳过；59 项前端测试及生产构建通过。5 组可重复 Chrome E2E 全通过，覆盖真实 HTTPS/WSS/Secure Cookie、账号/改密/撤销/绝对过期/多窗口、离线私聊/群邀请、联系人跨页与移动端、历史前向分页、未读摘要、刷新/服务重启、断网 65 条消息的完整 after 分页补拉、重复重试与迟到回执、在线备份及新路径恢复。发布包构建和 `release-smoke.mjs` 也实际通过 jar/lib、start-backend/local 脚本、指定 CA 的 curl、浏览器群消息、稳定 ID 和重启持久化。nginx/systemd/公网证书及 PostgreSQL 未在本机实测。
+
+## 协议与验收
+
+聊天协议使用 Protobuf v2 二进制载荷。生成命令、旧客户端升级、精确 int64 与完整分批同步见 [协议说明](protocol/README.md)；逐项实测结果和外部条件见 [验收记录](deployment/ACCEPTANCE.md)。

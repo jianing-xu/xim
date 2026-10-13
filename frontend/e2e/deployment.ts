@@ -1,5 +1,5 @@
 import { spawn, execFile, execFileSync, type ChildProcess } from 'node:child_process';
-import { mkdtempSync, readFileSync, createWriteStream } from 'node:fs';
+import { mkdtempSync, existsSync, createWriteStream } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { resolve, join } from 'node:path';
 import net from 'node:net';
@@ -31,8 +31,10 @@ export class Deployment {
     await promisify(execFile)('curl', ['--max-time', '10', '--noproxy', '*', '--fail', '--silent', '--cacert', join(this.dir, 'cert.pem'), this.url + '/api/health']);
   }
   async startBackend() {
-    const cp = join(root, 'backend/target/classes') + ':' + readFileSync(join(root, 'backend/target/classpath.txt'), 'utf8').trim();
-    this.backend = spawn('java', ['-Dxim.host=127.0.0.1', '-Dxim.port=0', `-Dxim.web.port=${this.port}`,
+    const bundle=join(root,'backend/target/release');
+    if(!existsSync(join(bundle,'xim.jar')))throw new Error('Build the release bundle first: npm run e2e:prepare');
+    const cp=join(bundle,'xim.jar')+':'+join(bundle,'lib/*');
+    this.backend = spawn('java', ['-Dxim.db.type=sqlite', '-Dxim.host=127.0.0.1', '-Dxim.port=0', `-Dxim.web.port=${this.port}`,
       `-Dxim.db.sqlite.path=${this.database}`, `-Dxim.log.dir=${this.dir}/logs`, '-Dxim.auth.demo=false',
       '-Dxim.web.cookieSecure=true', `-Dxim.web.allowedOrigins=${this.url}`, ...this.options, '-cp', cp, 'cn.xjn.xim.server.NettyServer'], { cwd: root, stdio: ['ignore', 'pipe', 'pipe'] });
     const log = createWriteStream(join(this.dir, 'backend.log'), { flags: 'a' });
@@ -50,6 +52,26 @@ export class Deployment {
       const timer = setTimeout(() => process.kill('SIGKILL'), 12_000);
       process.once('exit', () => { clearTimeout(timer); resolve(); }); process.kill('SIGTERM');
     });
+  }
+  seedConversations(count: number, more = false) {
+    execFileSync('python3', ['-c', `import sqlite3,sys,time
+with sqlite3.connect(sys.argv[1]) as db:
+    owner,password_hash=db.execute("SELECT user_id,password_hash FROM xim_users WHERE username='snapshot_owner'").fetchone()
+    for i in range(int(sys.argv[2])):
+        user='snapshot-user-%03d'%i
+        if sys.argv[3]!='more':
+            db.execute("INSERT INTO xim_users(user_id,username,password_hash,display_name) VALUES(?,?,?,?)",(user,'snapshot_%03d'%i,password_hash,'会话伙伴 %03d'%i))
+        prefix=('离线批次 ' if sys.argv[3]=='more' else '长摘要 ')+('%03d '%i)
+        db.execute("INSERT INTO xim_messages(message_id,sender_id,recipient_id,body,sent_at) VALUES(?,?,?,?,?)",(sys.argv[3]+'-snapshot-message-%03d'%i,user,owner,prefix+'中'*(4000-len(prefix)),int(time.time()*1000)))
+`, this.database, String(count), more ? 'more' : 'initial']);
+  }
+  seedLargeMessage(sender: string, recipient: string, sequence: string) {
+    execFileSync('python3', ['-c', `import sqlite3,sys,time
+with sqlite3.connect(sys.argv[1]) as db:
+    sender=db.execute("SELECT user_id FROM xim_users WHERE username=?",(sys.argv[2],)).fetchone()[0]
+    recipient=db.execute("SELECT user_id FROM xim_users WHERE username=?",(sys.argv[3],)).fetchone()[0]
+    db.execute("INSERT INTO xim_messages(seq,message_id,sender_id,recipient_id,body,sent_at) VALUES(?,?,?,?,?,?)",(int(sys.argv[4]),'precision-seed',sender,recipient,'int64 精度基线',int(time.time()*1000)))
+`, this.database, sender, recipient, sequence]);
   }
   seedContacts(count: number) {
     // Only this fixture's isolated database. Copy a real registration's hash for directory fixtures.

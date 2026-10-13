@@ -3,10 +3,8 @@ package cn.xjn.xim.web;
 import cn.xjn.xim.protocol.Packet;
 import cn.xjn.xim.protocol.request.*;
 import cn.xjn.xim.util.SessionManager;
-import com.alibaba.fastjson.JSON;
 import com.alibaba.fastjson.JSONArray;
 import com.alibaba.fastjson.JSONObject;
-import com.alibaba.fastjson.parser.Feature;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.SimpleChannelInboundHandler;
 import io.netty.handler.codec.http.websocketx.*;
@@ -17,13 +15,14 @@ import java.util.LinkedHashSet;
 import java.util.ArrayList;
 import java.util.concurrent.TimeUnit;
 
-/** Converts a small, validated JSON API into production IM packets. */
+/** Validates typed binary WebSocket requests and routes them to shared business handlers. */
 public class WebRequestHandler extends SimpleChannelInboundHandler<WebSocketFrame> {
     public static final int MAX_MESSAGE_LENGTH = 4000;
 
     @Override
     public void userEventTriggered(ChannelHandlerContext ctx, Object event) throws Exception {
         if (event instanceof WebSocketServerProtocolHandler.HandshakeComplete) {
+            cn.xjn.xim.server.limits.HandshakeDeadline.complete(ctx.channel());
             if (ctx.pipeline().get("handshake-timeout") != null) ctx.pipeline().remove("handshake-timeout");
             // Only upgraded WebSocket connections use the IM idle timeout.
             ctx.pipeline().addBefore(ctx.name(), "web-idle", new IdleStateHandler(60, 0, 0, TimeUnit.SECONDS));
@@ -35,13 +34,15 @@ public class WebRequestHandler extends SimpleChannelInboundHandler<WebSocketFram
 
     @Override
     protected void channelRead0(ChannelHandlerContext ctx, WebSocketFrame frame) {
-        if (!(frame instanceof TextWebSocketFrame text)) {
-            error(ctx, null, "仅支持 JSON 文本消息");
+        if (!(frame instanceof BinaryWebSocketFrame binary)) {
+            error(ctx, null, "仅支持 v2 Protobuf 二进制消息，请升级客户端");
             return;
         }
         String requestId = null;
         try {
-            JSONObject json = JSON.parseObject(text.text(), Feature.DisableSpecialKeyDetect);
+            byte[] bytes = new byte[binary.content().readableBytes()];
+            binary.content().getBytes(binary.content().readerIndex(), bytes);
+            JSONObject json = cn.xjn.xim.protobuf.ProtocolWire.decodeWeb(bytes, true);
             require(json != null, "请求必须是 JSON 对象");
             Object id = json.get("requestId");
             require(id == null || id instanceof String && !((String) id).isBlank() && ((String) id).length() <= 80, "请求编号无效");
@@ -247,6 +248,6 @@ public class WebRequestHandler extends SimpleChannelInboundHandler<WebSocketFram
     }
 
     private static void write(ChannelHandlerContext ctx, JSONObject json) {
-        ctx.writeAndFlush(new TextWebSocketFrame(json.toJSONString()));
+        ctx.writeAndFlush(cn.xjn.xim.protobuf.ProtocolWire.webFrame(json, false));
     }
 }

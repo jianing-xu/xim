@@ -65,3 +65,6 @@ backend/data/
 frontend/test-results/
 frontend/playwright-report/
 *.pem
+
+# Generated from protocol/xim.proto at build/test time
+frontend/src/generated/

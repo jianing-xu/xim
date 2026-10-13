@@ -1,5 +1,6 @@
 package cn.xjn.xim.integration;
 
+import cn.xjn.xim.protobuf.ProtocolWire;
 import cn.xjn.xim.protocol.request.*;
 import cn.xjn.xim.protocol.response.*;
 import cn.xjn.xim.util.SessionManager;
@@ -116,11 +117,11 @@ public class WebChatIT {
         a.send("users"); assertEquals("请先登录", a.receive("error").getString("reason"));
         a.socket.sendText("{broken", true).join(); a.receive("error");
         a.socket.sendText("null", true).join(); a.receive("error");
-        a.send("login", "username", List.of("root"), "password", "root"); a.receive("error");
+        a.socket.sendBinary(java.nio.ByteBuffer.wrap(new byte[]{(byte)0x80}), true).join(); a.receive("error");
         String id = a.login("root");
         a.send("login", "username", "aaa", "password", "aaa"); a.receive("error");
         assertEquals("root", SessionManager.getSession(SessionManager.getChannel(id)).getUsername());
-        a.send("unknown"); a.receive("error");
+        a.socket.sendBinary(java.nio.ByteBuffer.wrap(cn.xjn.xim.protobuf.XimWire.Envelope.newBuilder().setVersion(2).build().toByteArray()), true).join(); a.receive("error");
         a.send("logout"); assertTrue(a.receive("logout").getBooleanValue("success"));
         assertNull(SessionManager.getChannel(id));
         a.send("users"); a.receive("error");
@@ -268,21 +269,31 @@ public class WebChatIT {
     }
     private static class Peer implements WebSocket.Listener, AutoCloseable {
         private final BlockingQueue<JSONObject> inbox = new LinkedBlockingQueue<>();
-        private final StringBuilder fragments = new StringBuilder();
+        private final java.io.ByteArrayOutputStream fragments = new java.io.ByteArrayOutputStream();
         private WebSocket socket;
         private String userId;
         private boolean closed;
 
         @Override public void onOpen(WebSocket webSocket) { webSocket.request(1); }
-        @Override public CompletionStage<?> onText(WebSocket webSocket, CharSequence data, boolean last) {
-            fragments.append(data);
-            if (last) { inbox.add(JSON.parseObject(fragments.toString())); fragments.setLength(0); }
-            webSocket.request(1); return null;
+        @Override public CompletionStage<?> onBinary(WebSocket ws, java.nio.ByteBuffer data, boolean last) {
+            byte[] bytes = new byte[data.remaining()]; data.get(bytes); fragments.writeBytes(bytes);
+            if (last) { inbox.add(ProtocolWire.decodeWeb(fragments.toByteArray(), false)); fragments.reset(); }
+            ws.request(1); return null;
         }
         void send(String type, Object... fields) {
             JSONObject json = new JSONObject(); json.put("type", type);
             for (int i = 0; i < fields.length; i += 2) json.put((String) fields[i], fields[i + 1]);
-            socket.sendText(json.toJSONString(), true).join();
+            String forged = json.getString("fromUserId"); json.remove("fromUserId");
+            byte[] bytes = ProtocolWire.encodeWeb(json, true);
+            if (forged != null) {
+                try {
+                    var envelope=cn.xjn.xim.protobuf.XimWire.Envelope.parseFrom(bytes);
+                    var unknown=com.google.protobuf.UnknownFieldSet.newBuilder().addField(99,com.google.protobuf.UnknownFieldSet.Field.newBuilder()
+                            .addLengthDelimited(com.google.protobuf.ByteString.copyFromUtf8(forged)).build()).build();
+                    bytes=envelope.toBuilder().setMessageRequest(envelope.getMessageRequest().toBuilder().setUnknownFields(unknown)).build().toByteArray();
+                } catch (Exception failure) { throw new AssertionError(failure); }
+            }
+            socket.sendBinary(java.nio.ByteBuffer.wrap(bytes), true).join();
         }
         JSONObject receive(String type) throws InterruptedException {
             JSONObject json = inbox.poll(4, TimeUnit.SECONDS); assertNotNull("No WebSocket response: " + type, json);

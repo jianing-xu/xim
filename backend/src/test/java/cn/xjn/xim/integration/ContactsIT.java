@@ -1,5 +1,6 @@
 package cn.xjn.xim.integration;
 
+import cn.xjn.xim.protobuf.ProtocolWire;
 import cn.xjn.xim.server.NettyServer;
 import com.alibaba.fastjson.*;
 import org.junit.Test;
@@ -33,7 +34,7 @@ public class ContactsIT {
                 alice.send("conversations"); assertTrue(alice.receive("conversations").getJSONArray("conversations").isEmpty());
                 List<JSONObject> all = new ArrayList<>(); String after = null; int pages = 0;
                 do {
-                    List<Object> fields = new ArrayList<>(List.of("requestId", "page-" + pages, "limit", 1, "query", "_user", "userId", c));
+                    List<Object> fields = new ArrayList<>(List.of("requestId", "page-" + pages, "limit", 1, "query", "_user"));
                     if (after != null) { fields.add("after"); fields.add(after); }
                     alice.send("contacts", fields.toArray());
                     var response = alice.receive("contacts"); assertEquals("page-" + pages, response.getString("requestId"));
@@ -55,12 +56,12 @@ public class ContactsIT {
                 }
                 alice.send("contacts", "query", "missing", "requestId", "empty");
                 assertTrue(alice.receive("contacts").getJSONArray("users").isEmpty());
-                for (Object limit : List.of(0, 51, "20", 1.5)) {
+                for (Object limit : List.of(0, 51)) {
                     alice.send("contacts", "limit", limit, "requestId", "bad");
                     assertEquals("bad", alice.receive("error").getString("requestId"));
                 }
                 alice.send("contacts", "query", "x".repeat(65), "requestId", "long"); alice.receive("error");
-                alice.send("contacts", "query", List.of("bad"), "requestId", "shape"); alice.receive("error");
+                alice.socket.sendBinary(java.nio.ByteBuffer.wrap(new byte[]{(byte)0x80}), true).join(); alice.receive("error");
                 alice.send("contacts"); alice.receive("error");
                 alice.send("message", "toUserId", "missing-user", "message", "bad", "requestId", "missing");
                 assertEquals("missing", alice.receive("error").getString("requestId"));
@@ -110,20 +111,21 @@ public class ContactsIT {
     }
     private static final class Peer implements WebSocket.Listener, AutoCloseable {
         final BlockingQueue<JSONObject> inbox = new LinkedBlockingQueue<>();
-        final StringBuilder fragments = new StringBuilder(); final WebSocket socket;
+        private final java.io.ByteArrayOutputStream fragments = new java.io.ByteArrayOutputStream(); final WebSocket socket;
         Peer(HttpClient http, URI base) {
             socket = http.newWebSocketBuilder().connectTimeout(Duration.ofSeconds(3))
                     .buildAsync(URI.create(base.toString().replace("http:", "ws:") + "/ws"), this).join();
         }
         @Override public void onOpen(WebSocket socket) { socket.request(1); }
-        @Override public CompletionStage<?> onText(WebSocket socket, CharSequence data, boolean last) {
-            fragments.append(data); if (last) { inbox.add(JSON.parseObject(fragments.toString())); fragments.setLength(0); }
-            socket.request(1); return null;
+        @Override public CompletionStage<?> onBinary(WebSocket ws, java.nio.ByteBuffer data, boolean last) {
+            byte[] bytes = new byte[data.remaining()]; data.get(bytes); fragments.writeBytes(bytes);
+            if (last) { inbox.add(ProtocolWire.decodeWeb(fragments.toByteArray(), false)); fragments.reset(); }
+            ws.request(1); return null;
         }
         void send(String type, Object... fields) {
             var data = new JSONObject(); data.put("type", type);
             for (int i = 0; i < fields.length; i += 2) data.put((String)fields[i], fields[i + 1]);
-            socket.sendText(data.toJSONString(), true).join();
+            socket.sendBinary(java.nio.ByteBuffer.wrap(ProtocolWire.encodeWeb(data, true)), true).join();
         }
         JSONObject receive(String type) throws Exception {
             var data = inbox.poll(5, TimeUnit.SECONDS); assertNotNull("Missing " + type, data);

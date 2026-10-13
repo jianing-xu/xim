@@ -1,3 +1,4 @@
+import { encodeServerEvent, decodeClientEvent } from './protocol-wire';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ChatClient } from './chat-client';
 import type { ServerEvent, StoredMessage } from './protocol';
@@ -15,9 +16,9 @@ class Socket extends EventTarget {
   sent: Record<string,unknown>[] = [];
   constructor(readonly url:string) { super(); Socket.all.push(this); }
   open() { this.readyState = 1; this.dispatchEvent(new Event('open')); }
-  send(value:string) { this.sent.push(JSON.parse(value)); }
+  send(value:ArrayBuffer) { this.sent.push(decodeClientEvent(new Uint8Array(value))); }
   close() { this.readyState = 3; this.dispatchEvent(new Event('close')); }
-  receive(data:ServerEvent) { this.dispatchEvent(new MessageEvent('message',{data:JSON.stringify(data)})); }
+  receive(data:ServerEvent) { this.dispatchEvent(new MessageEvent('message',{data:new Uint8Array(encodeServerEvent(data)).buffer})); }
 }
 let client:ChatClient, socket:Socket, storage:MemoryStorage, local:MemoryStorage;
 const url = ()=>'wss://example.test/ws';
@@ -40,6 +41,7 @@ function page(messages:StoredMessage[],more:boolean,cursor:number) {
   const request=socket.sent.filter(value=>value.type==='history'&&value.after!==undefined).at(-1)!;
   socket.receive({type:'history',kind:'user',id:'peer',requestId:request.requestId as string,messages,nextBefore:null,
     nextAfter:String(messages.at(-1)?.sequence ?? request.after),hasMore:more,syncCursor:cursor});
+  vi.advanceTimersByTime(50);
 }
 beforeEach(()=>{
   vi.useFakeTimers();Socket.all=[];storage=new MemoryStorage();local=new MemoryStorage();
@@ -69,13 +71,13 @@ describe('credential and incremental recovery',()=>{
     socket.receive({type:'sent',requestId:request.requestId as string,id:'m80',sequence:80,time:80});
     page(Array.from({length:50},(_,i)=>row(i+11)),true,150);
     expect(socket.sent.at(-1)?.after).toBe('60');
-    expect(JSON.parse(storage.getItem('xim.recovery')!).cursors).toEqual([['user:peer',10]]);
+    expect(JSON.parse(storage.getItem('xim.recovery')!).cursors).toEqual([['user:peer','10']]);
     page([...Array.from({length:15},(_,i)=>row(i+61)),row(80,true,request.requestId as string),row(150)],false,150);
     expect(chat().messages).toHaveLength(68);expect(new Set(chat().messages.map(row=>row.id)).size).toBe(68);
     expect(chat().messages.find(row=>row.id==='m80')?.status).toBe('已发送');
     expect(client.getSnapshot()).toMatchObject({current:'user:peer',showChat:true,syncing:false});expect(chat().draft).toBe('independent draft');
     expect(socket.sent.filter(value=>value.type==='message')).toHaveLength(0);
-    expect(JSON.parse(storage.getItem('xim.recovery')!).cursors).toEqual([['user:peer',150]]);
+    expect(JSON.parse(storage.getItem('xim.recovery')!).cursors).toEqual([['user:peer','150']]);
   });
   it('restarts an interrupted multi-page pull from its committed frontier and deduplicates retained first-page messages',()=>{
     auth();socket.close();reconnect();socket.receive({type:'conversations',syncCursor:75,conversations:[summary(75)]});
@@ -131,7 +133,7 @@ describe('credential and incremental recovery',()=>{
   it('reconnects on a missing sync response while preserving its frontier',()=>{
     auth();socket.close();reconnect();socket.receive({type:'conversations',syncCursor:75,conversations:[summary(75)]});
     vi.advanceTimersByTime(8000);expect(socket.readyState).toBe(3);
-    expect(JSON.parse(storage.getItem('xim.recovery')!).cursors).toEqual([['user:peer',10]]);
+    expect(JSON.parse(storage.getItem('xim.recovery')!).cursors).toEqual([['user:peer','10']]);
   });
   it('times out a missing recovery snapshot instead of remaining in syncing indefinitely',()=>{
     auth();socket.close();reconnect();vi.advanceTimersByTime(8000);
@@ -161,4 +163,72 @@ describe('credential and incremental recovery',()=>{
     expect(JSON.stringify([...storage.data])).not.toContain('single-use-ticket');
   });
 
+});
+
+describe('precise cursor recovery', () => {
+  it('restores decimal cached frontiers above 2^53, orders adjacent messages and follows after pages exactly', () => {
+    auth();client.stop();
+    const base='9007199254740993', next='9007199254740994', last='9007199254740995';
+    const cached=JSON.parse(storage.getItem('xim.recovery')!);cached.cursors=[['user:peer',base]];
+    cached.conversations[0].lastSequence=base;cached.conversations[0].readSequence=base;
+    cached.conversations[0].messages=[{...cached.conversations[0].messages[0],id:'large-base',sequence:base}];
+    storage.setItem('xim.recovery',JSON.stringify(cached));client=new ChatClient(url);client.start();socket=Socket.all.at(-1)!;socket.open();
+    socket.receive({type:'resume',success:true,userId:'me',username:'Me',connectionId:'lease-large'});
+    socket.receive({type:'conversations',syncCursor:last,conversations:[{kind:'user',id:'peer',name:'Peer',lastSequence:last,readSequence:base,unread:2}]});
+    expect(socket.sent.at(-1)?.after).toBe(base);
+    let request=socket.sent.at(-1)!;
+    socket.receive({type:'history',requestId:request.requestId as string,kind:'user',id:'peer',messages:[{...row(1),id:'large-next',sequence:next}],nextBefore:null,nextAfter:next,hasMore:true,syncCursor:last});
+    vi.advanceTimersByTime(50);
+    expect(socket.sent.at(-1)?.after).toBe(next);request=socket.sent.at(-1)!;
+    socket.receive({type:'history',requestId:request.requestId as string,kind:'user',id:'peer',messages:[{...row(2),id:'large-last',sequence:last}],nextBefore:null,nextAfter:last,hasMore:false,syncCursor:last});
+    expect(chat().messages.map(message=>message.sequence)).toEqual([base,next,last]);
+    expect(JSON.parse(storage.getItem('xim.recovery')!).cursors).toEqual([['user:peer',last]]);
+    expect(client.getSnapshot().syncing).toBe(false);
+    const latest=socket.sent.at(-1)!;
+    socket.receive({type:'history',requestId:latest.requestId as string,kind:'user',id:'peer',messages:[{...row(2),id:'large-last',sequence:last}],nextBefore:null,hasMore:false});
+    client.reportReading('user:peer',true,true);
+    expect(socket.sent.filter(event=>event.type==='read').at(-1)?.sequence).toBe(last);
+  });
+  it('discards an unsafe old numeric cache before constructing synchronization state', () => {
+    auth();client.stop();const cached=JSON.parse(storage.getItem('xim.recovery')!);cached.cursors=[['user:peer',9007199254740992]];
+    storage.setItem('xim.recovery',JSON.stringify(cached));client=new ChatClient(url);client.start();socket=Socket.all.at(-1)!;socket.open();
+    expect(client.getSnapshot().conversations).toEqual([]);
+    socket.receive({type:'resume',success:true,userId:'me',username:'Me'});
+    socket.receive({type:'conversations',syncCursor:'9007199254740993',conversations:[{kind:'user',id:'peer',name:'Peer',lastSequence:'9007199254740993',unread:1}]});
+    expect(socket.sent.at(-1)?.after).toBe('0');
+  });
+  it('decodes Blob followed by ArrayBuffer in order and discards stale socket Blob completion', async () => {
+    auth();
+    socket.dispatchEvent(new MessageEvent('message',{data:new Blob([new Uint8Array(encodeServerEvent({type:'message',fromUserId:'peer',fromUsername:'Peer',id:'blob',sequence:'11',time:11,message:'blob'})).buffer])}));
+    socket.receive({type:'message',fromUserId:'peer',fromUsername:'Peer',id:'array',sequence:'12',time:12,message:'array'});
+    await vi.waitFor(()=>expect(chat().messages.slice(-2).map(message=>message.id)).toEqual(['blob','array']));
+    let resolve!: (data:ArrayBuffer)=>void;
+    const blob=new Blob();vi.spyOn(blob,'arrayBuffer').mockImplementation(()=>new Promise(r=>resolve=r));
+    socket.dispatchEvent(new MessageEvent('message',{data:blob}));socket.close();reconnect();
+    resolve(new Uint8Array(encodeServerEvent({type:'message',fromUserId:'peer',fromUsername:'Peer',id:'stale',sequence:'13',time:13,message:'stale'})).buffer);
+    await Promise.resolve();expect(chat().messages.some(message=>message.id==='stale')).toBe(false);
+  });
+});
+
+describe('complete snapshot assembly',()=>{
+  it('applies the directory only after the final matching chunk, then replays from the cached frontier',()=>{
+    auth();socket.close();reconnect();
+    socket.receive({type:'conversations',snapshotId:'snapshot',part:0,hasMore:true,syncCursor:'20',conversations:[summary(20,10)]});
+    expect(chat().lastSequence).toBe('10');expect(socket.sent.some(value=>value.type==='history')).toBe(false);
+    socket.receive({type:'conversations',snapshotId:'snapshot',part:1,hasMore:false,syncCursor:'20',conversations:[]});
+    expect(chat().lastSequence).toBe('20');expect(socket.sent.at(-1)?.after).toBe('10');
+    page(Array.from({length:10},(_,i)=>row(i+11)),false,20);expect(client.getSnapshot().syncing).toBe(false);
+  });
+  it('discards an incomplete/mismatched snapshot and preserves confirmed cursor on reconnect',()=>{
+    auth();socket.close();reconnect();
+    socket.receive({type:'conversations',snapshotId:'snapshot',part:0,hasMore:true,syncCursor:'20',conversations:[summary(20,10)]});
+    socket.receive({type:'conversations',snapshotId:'wrong',part:1,hasMore:false,syncCursor:'20',conversations:[]});
+    expect(socket.readyState).toBe(3);expect(JSON.parse(storage.getItem('xim.recovery')!).cursors).toEqual([['user:peer','10']]);
+  });
+});
+
+it('rejects an oversized Blob before copying it into an ArrayBuffer',()=>{
+  auth();const blob=new Blob([new Uint8Array(64*1024+1)]);const copy=vi.spyOn(blob,'arrayBuffer');
+  socket.dispatchEvent(new MessageEvent('message',{data:blob}));
+  expect(copy).not.toHaveBeenCalled();expect(socket.readyState).toBe(3);
 });

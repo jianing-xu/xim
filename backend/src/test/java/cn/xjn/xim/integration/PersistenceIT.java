@@ -1,5 +1,6 @@
 package cn.xjn.xim.integration;
 
+import cn.xjn.xim.protobuf.ProtocolWire;
 import cn.xjn.xim.server.NettyServer;
 import cn.xjn.xim.protocol.request.*;
 import cn.xjn.xim.protocol.response.*;
@@ -211,19 +212,20 @@ public class PersistenceIT {
     }
     private static class Browser implements WebSocket.Listener, AutoCloseable {
         private final BlockingQueue<JSONObject> inbox = new LinkedBlockingQueue<>();
-        private final StringBuilder text = new StringBuilder(); private final WebSocket socket;
+        private final java.io.ByteArrayOutputStream fragments = new java.io.ByteArrayOutputStream(); private final WebSocket socket;
         Browser(HttpClient http,int port) {
             socket = http.newWebSocketBuilder().buildAsync(URI.create("ws://127.0.0.1:"+port+"/ws"),this).join();
         }
         @Override public void onOpen(WebSocket socket) { socket.request(1); }
-        @Override public CompletionStage<?> onText(WebSocket socket,CharSequence fragment,boolean last) {
-            text.append(fragment); if(last) { inbox.add(JSON.parseObject(text.toString())); text.setLength(0); }
-            socket.request(1); return null;
+        @Override public CompletionStage<?> onBinary(WebSocket ws, java.nio.ByteBuffer data, boolean last) {
+            byte[] bytes = new byte[data.remaining()]; data.get(bytes); fragments.writeBytes(bytes);
+            if (last) { inbox.add(ProtocolWire.decodeWeb(fragments.toByteArray(), false)); fragments.reset(); }
+            ws.request(1); return null;
         }
         void send(String type,Object... fields) {
             JSONObject message = new JSONObject(); message.put("type",type);
             for(int i=0;i<fields.length;i+=2) message.put((String)fields[i],fields[i+1]);
-            socket.sendText(message.toJSONString(),true).join();
+            socket.sendBinary(java.nio.ByteBuffer.wrap(ProtocolWire.encodeWeb(message, true)), true).join();
         }
         JSONObject receive(String type) throws InterruptedException {
             var result = inbox.poll(5,TimeUnit.SECONDS); assertNotNull("Missing "+type,result);

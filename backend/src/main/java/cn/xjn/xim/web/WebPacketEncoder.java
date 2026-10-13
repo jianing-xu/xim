@@ -6,7 +6,6 @@ import com.alibaba.fastjson.JSON;
 import com.alibaba.fastjson.JSONObject;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.handler.codec.MessageToMessageEncoder;
-import io.netty.handler.codec.http.websocketx.TextWebSocketFrame;
 
 import java.util.List;
 import java.util.Map;
@@ -36,6 +35,6 @@ public class WebPacketEncoder extends MessageToMessageEncoder<Packet> {
         json.remove("command");
         json.remove("version");
         json.put("type", TYPES.get(packet.getCommand()));
-        out.add(new TextWebSocketFrame(json.toJSONString()));
+        out.add(cn.xjn.xim.protobuf.ProtocolWire.webFrame(json, false));
     }
 }

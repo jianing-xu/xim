@@ -1,3 +1,4 @@
+import { encodeServerEvent, decodeClientEvent } from './protocol-wire';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { ChatClient } from './chat-client';
@@ -13,9 +14,9 @@ class Socket extends EventTarget {
   sent: Record<string, unknown>[] = [];
   constructor(readonly url: string) { super(); Socket.all.push(this); }
   open() { this.readyState = 1; this.dispatchEvent(new Event('open')); }
-  send(value: string) { this.sent.push(JSON.parse(value)); }
+  send(value: ArrayBuffer) { this.sent.push(decodeClientEvent(new Uint8Array(value))); }
   close() { this.readyState = 3; this.dispatchEvent(new Event('close')); }
-  receive(data: ServerEvent) { this.dispatchEvent(new MessageEvent('message', { data: JSON.stringify(data) })); }
+  receive(data: ServerEvent) { this.dispatchEvent(new MessageEvent('message', { data: new Uint8Array(encodeServerEvent(data)).buffer })); }
 }
 let client: ChatClient, socket: Socket;
 const contact = (userId: string, online = false): Contact => ({ userId, username: userId + '_account', displayName: '伙伴 ' + userId, online });

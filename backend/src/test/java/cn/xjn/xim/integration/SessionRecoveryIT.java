@@ -1,5 +1,6 @@
 package cn.xjn.xim.integration;
 
+import cn.xjn.xim.protobuf.ProtocolWire;
 import cn.xjn.xim.server.NettyServer;
 import cn.xjn.xim.protocol.request.*;
 import cn.xjn.xim.protocol.response.*;
@@ -172,11 +173,15 @@ public class SessionRecoveryIT {
     private static void assertNoSecrets(String output,String cookie){assertFalse(output.contains(cookie.split("=",2)[1]));assertFalse(output.contains("new-private-password"));}
     private static void delete(Path dir) throws Exception {try(var paths=Files.walk(dir)){for(var p:paths.sorted(Comparator.reverseOrder()).toList())Files.deleteIfExists(p);}}
     private static final class Peer implements WebSocket.Listener,AutoCloseable {
-        private final BlockingQueue<JSONObject> inbox=new LinkedBlockingQueue<>();private final StringBuilder fragments=new StringBuilder();private final WebSocket socket;
+        private final BlockingQueue<JSONObject> inbox=new LinkedBlockingQueue<>();private final java.io.ByteArrayOutputStream fragments = new java.io.ByteArrayOutputStream();private final WebSocket socket;
         Peer(HttpClient http,URI base,String cookie){var builder=http.newWebSocketBuilder().connectTimeout(Duration.ofSeconds(3));if(cookie!=null)builder.header("Cookie",cookie);socket=builder.buildAsync(URI.create(base.toString().replace("http:","ws:")+"/ws"),this).join();}
         @Override public void onOpen(WebSocket socket){socket.request(1);}
-        @Override public CompletionStage<?> onText(WebSocket socket,CharSequence data,boolean last){fragments.append(data);if(last){inbox.add(JSON.parseObject(fragments.toString()));fragments.setLength(0);}socket.request(1);return null;}
-        void send(String type,Object...fields){var json=new JSONObject();json.put("type",type);for(int i=0;i<fields.length;i+=2)json.put((String)fields[i],fields[i+1]);socket.sendText(json.toJSONString(),true).join();}
+        @Override public CompletionStage<?> onBinary(WebSocket ws, java.nio.ByteBuffer data, boolean last) {
+            byte[] bytes = new byte[data.remaining()]; data.get(bytes); fragments.writeBytes(bytes);
+            if (last) { inbox.add(ProtocolWire.decodeWeb(fragments.toByteArray(), false)); fragments.reset(); }
+            ws.request(1); return null;
+        }
+        void send(String type,Object...fields){var json=new JSONObject();json.put("type",type);for(int i=0;i<fields.length;i+=2)json.put((String)fields[i],fields[i+1]);socket.sendBinary(java.nio.ByteBuffer.wrap(ProtocolWire.encodeWeb(json, true)), true).join();}
         JSONObject receive(String type) throws Exception {var data=inbox.poll(5,TimeUnit.SECONDS);assertNotNull("Missing "+type,data);assertEquals(data.toJSONString(),type,data.getString("type"));return data;}
         JSONObject login(String username,String password) throws Exception {send("login","username",username,"password",password);return receive("login");}
         @Override public void close(){if(!socket.isOutputClosed())socket.sendClose(1000,"done").join();}

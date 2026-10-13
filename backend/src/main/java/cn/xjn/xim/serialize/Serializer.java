@@ -1,6 +1,5 @@
 package cn.xjn.xim.serialize;
 
-import cn.xjn.xim.serialize.impl.JSONSerializer;
 
 /**
  * @author xjn
@@ -8,7 +7,7 @@ import cn.xjn.xim.serialize.impl.JSONSerializer;
  */
 public interface Serializer {
 
-    Serializer DEFAULT = new JSONSerializer();
+    Serializer DEFAULT = new cn.xjn.xim.serialize.impl.ProtobufSerializer();
 
     // get serializer algorithm
     byte getSerializerAlgorithm();

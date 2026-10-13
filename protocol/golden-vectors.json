@@ -1,0 +1,105 @@
+[
+  {
+    "request": true,
+    "event": {
+      "type": "login",
+      "username": "用户",
+      "password": "test-only",
+      "requestId": "登录编号"
+    },
+    "base64": "CiIKBueUqOaItxIJdGVzdC1vbmx5ogYM55m75b2V57yW5Y+3wD4C"
+  },
+  {
+    "request": true,
+    "event": {
+      "type": "message",
+      "toUserId": "peer",
+      "message": "中文 🌏\n<script>",
+      "requestId": "client-1"
+    },
+    "base64": "GicKBHBlZXISFOS4reaWhyDwn4yPCjxzY3JpcHQ+ogYIY2xpZW50LTHAPgI="
+  },
+  {
+    "request": true,
+    "event": {
+      "type": "history",
+      "kind": "user",
+      "id": "peer",
+      "after": "9007199254740993",
+      "limit": 50,
+      "requestId": "page"
+    },
+    "base64": "mgEeCgR1c2VyEgRwZWVyIIGAgICAgIAQKDKiBgRwYWdlwD4C"
+  },
+  {
+    "request": true,
+    "event": {
+      "type": "read",
+      "kind": "group",
+      "id": "group",
+      "sequence": "9223372036854775807",
+      "requestId": "read"
+    },
+    "base64": "6gEfCgVncm91cBIFZ3JvdXAY//////////9/ogYEcmVhZMA+Ag=="
+  },
+  {
+    "request": false,
+    "event": {
+      "type": "history",
+      "messages": [
+        {
+          "id": "server-id",
+          "sequence": "9223372036854775807",
+          "fromUserId": "peer",
+          "fromUsername": "用户",
+          "message": "中文 📨",
+          "time": "1700000000000",
+          "clientMessageId": "client-1"
+        }
+      ],
+      "kind": "user",
+      "id": "peer",
+      "nextAfter": "9223372036854775807",
+      "hasMore": false,
+      "syncCursor": "9223372036854775807",
+      "requestId": "page"
+    },
+    "base64": "ogFsCgR1c2VyEgRwZWVyGkEKCXNlcnZlci1pZBD//////////38aBHBlZXIiBueUqOaItyoL5Lit5paHIPCfk6gwgNCV/7wxOghjbGllbnQtMSj//////////38wADj//////////3+iBgRwYWdlwD4C"
+  },
+  {
+    "request": false,
+    "event": {
+      "type": "conversations",
+      "conversations": [
+        {
+          "kind": "user",
+          "id": "peer",
+          "name": "用户",
+          "lastSequence": "9007199254740995",
+          "readSequence": "9007199254740993",
+          "unread": "2"
+        }
+      ],
+      "syncCursor": "9223372036854775807"
+    },
+    "base64": "sgE0CigKBHVzZXISBHBlZXIaBueUqOaItyiDgICAgICAEDiBgICAgICAEEACEP//////////f8A+Ag=="
+  },
+  {
+    "request": false,
+    "event": {
+      "type": "contacts",
+      "users": [
+        {
+          "userId": "peer",
+          "username": "peer_user",
+          "displayName": "离线用户",
+          "online": false
+        }
+      ],
+      "nextAfter": "peer",
+      "hasMore": true,
+      "requestId": "directory"
+    },
+    "base64": "qgI3CiEKBHBlZXISCXBlZXJfdXNlchoM56a757q/55So5oi3IAASBHBlZXIYAaIGCWRpcmVjdG9yecA+Ag=="
+  }
+]

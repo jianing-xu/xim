@@ -6,5 +6,8 @@ import lombok.Data;
 public class ConversationsResponsePacket extends Packet {
     private java.util.List<cn.xjn.xim.storage.ChatStore.Conversation> conversations;
     private long syncCursor;
+    private String snapshotId;
+    private Integer part;
+    private Boolean hasMore;
     @Override public Byte getCommand() { return Command.CONVERSATIONS_RESPONSE; }
 }

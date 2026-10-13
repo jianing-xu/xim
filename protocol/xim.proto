@@ -1,0 +1,111 @@
+syntax = "proto3";
+package xim.v2;
+option java_package = "cn.xjn.xim.protobuf";
+option java_outer_classname = "XimWire";
+
+// Transport v2. Field numbers 1..30 match the preserved TCP command numbers.
+// Never reuse numbers. All scalar business fields have explicit presence.
+message Envelope {
+  uint32 version = 1000;
+  oneof payload {
+    LoginRequest login_request = 1;
+    LoginResponse login_response = 2;
+    MessageRequest message_request = 3;
+    MessageResponse message_response = 4;
+    EmptyRequest logout_request = 5;
+    SuccessResponse logout_response = 6;
+    CreateGroupRequest create_group_request = 7;
+    GroupResponse create_group_response = 8;
+    GroupRequest members_request = 9;
+    MembersResponse members_response = 10;
+    GroupRequest join_group_request = 11;
+    GroupResponse join_group_response = 12;
+    GroupRequest quit_group_request = 13;
+    GroupResponse quit_group_response = 14;
+    GroupMessageRequest group_message_request = 15;
+    GroupMessageResponse group_message_response = 16;
+    EmptyRequest heartbeat_request = 17;
+    EmptyResponse heartbeat_response = 18;
+    HistoryRequest history_request = 19;
+    HistoryResponse history_response = 20;
+    EmptyRequest conversations_request = 21;
+    ConversationsResponse conversations_response = 22;
+    ErrorResponse error_response = 23;
+    SentResponse sent_response = 24;
+    RegisterRequest register_request = 25;
+    SuccessResponse register_response = 26;
+    ChangePasswordRequest change_password_request = 27;
+    SuccessResponse change_password_response = 28;
+    ReadRequest read_request = 29;
+    ReadResponse read_response = 30;
+    ResumeRequest resume_request = 31;
+    LoginResponse resume_response = 32;
+    SessionInvalidResponse session_invalid_response = 33;
+    EmptyRequest users_request = 34;
+    UsersResponse users_response = 35;
+    ContactsRequest contacts_request = 36;
+    ContactsResponse contacts_response = 37;
+    EmptyRequest revoke_sessions_request = 38;
+  }
+}
+message User { optional string user_id = 1; optional string username = 2; }
+message Contact { optional string user_id = 1; optional string username = 2; optional string display_name = 3; optional bool online = 4; }
+message StoredMessage {
+  optional string id = 1; optional int64 sequence = 2;
+  optional string from_user_id = 3; optional string from_username = 4;
+  optional string message = 5; optional int64 time = 6; optional string client_message_id = 7;
+}
+message Conversation {
+  optional string kind = 1; optional string id = 2; optional string name = 3;
+  StoredMessage last_message = 4; optional int64 last_sequence = 5; optional int64 last_time = 6;
+  optional int64 read_sequence = 7; optional int64 unread = 8;
+}
+message EmptyRequest { optional string request_id = 100; }
+message EmptyResponse { optional string request_id = 100; }
+message LoginRequest { optional string username = 1; optional string password = 2; optional string request_id = 100; }
+message LoginResponse {
+  optional bool success = 1; optional string user_id = 2; optional string username = 3; optional string reason = 4;
+  optional string session_ticket = 5; optional string connection_id = 6; optional int64 expires_at = 7; optional string request_id = 100;
+}
+message RegisterRequest { optional string username = 1; optional string password = 2; optional string display_name = 3; optional string request_id = 100; }
+message ChangePasswordRequest { optional string current_password = 1; optional string new_password = 2; optional string request_id = 100; }
+message SuccessResponse { optional bool success = 1; optional string reason = 2; optional string request_id = 100; }
+message MessageRequest { optional string to_user_id = 1; optional string message = 2; optional string request_id = 100; }
+message MessageResponse {
+  optional string from_user_id = 1; optional string from_username = 2; optional string message = 3;
+  optional string id = 4; optional int64 sequence = 5; optional int64 time = 6; optional string request_id = 100;
+}
+message CreateGroupRequest { repeated string user_ids = 1; optional string request_id = 100; }
+message GroupRequest { optional string group_id = 1; optional string request_id = 100; }
+message GroupResponse {
+  optional bool success = 1; optional string group_id = 2; optional string reason = 3;
+  repeated string username_list = 4; optional string request_id = 100;
+}
+message MembersResponse { optional string group_id = 1; repeated User sessions = 2; optional string request_id = 100; }
+message GroupMessageRequest { optional string group_id = 1; optional string message = 2; optional string request_id = 100; }
+message GroupMessageResponse {
+  optional string from_group_id = 1; optional string from_user_id = 2; optional string from_user = 3;
+  optional string message = 4; optional string id = 5; optional int64 sequence = 6; optional int64 time = 7; optional string request_id = 100;
+}
+message HistoryRequest {
+  optional string kind = 1; optional string id = 2; optional int64 before = 3; optional int64 after = 4;
+  optional int32 limit = 5; optional string request_id = 100;
+}
+message HistoryResponse {
+  optional string kind = 1; optional string id = 2; repeated StoredMessage messages = 3;
+  optional int64 next_before = 4; optional int64 next_after = 5; optional bool has_more = 6;
+  optional int64 sync_cursor = 7; optional string request_id = 100;
+}
+message ConversationsResponse {
+  repeated Conversation conversations = 1; optional int64 sync_cursor = 2;
+  optional string snapshot_id = 4; optional int32 part = 5; optional bool has_more = 6; optional string request_id = 100;
+}
+message ReadRequest { optional string kind = 1; optional string id = 2; optional int64 sequence = 3; optional string request_id = 100; }
+message ReadResponse { Conversation conversation = 1; optional int64 sync_cursor = 2; optional string request_id = 100; }
+message SentResponse { optional string id = 1; optional int64 sequence = 2; optional int64 time = 3; optional string request_id = 100; }
+message ErrorResponse { optional string reason = 1; optional string request_id = 100; }
+message ResumeRequest { optional string connection_id = 1; optional string request_id = 100; }
+message SessionInvalidResponse { optional string code = 1; optional string reason = 2; optional string request_id = 100; }
+message UsersResponse { repeated User users = 1; optional string request_id = 100; }
+message ContactsRequest { optional string query = 1; optional string after = 2; optional int32 limit = 3; optional string request_id = 100; }
+message ContactsResponse { repeated Contact users = 1; optional string next_after = 2; optional bool has_more = 3; optional string request_id = 100; }

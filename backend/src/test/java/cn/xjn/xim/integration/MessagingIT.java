@@ -177,7 +177,7 @@ public class MessagingIT {
     }
 
     @Test(timeout = 20000)
-    public void processesCoalescedFramesAndSkipsUnknownAlgorithms() throws Exception {
+    public void processesCoalescedFramesAndRejectsUnknownAlgorithms() throws Exception {
         TcpPeer peer = peer();
         LoginRequestPacket login = new LoginRequestPacket();
         login.setUsername("root");
@@ -186,7 +186,6 @@ public class MessagingIT {
         unknown[5] = 127;
         ByteArrayOutputStream bytes = new ByteArrayOutputStream();
         bytes.write(TcpPeer.encode(login));
-        bytes.write(unknown);
         bytes.write(TcpPeer.encode(new HeartbeatRequestPacket()));
         peer.sendBytes(bytes.toByteArray());
         LoginResponsePacket response = peer.receive(LoginResponsePacket.class);
@@ -194,6 +193,7 @@ public class MessagingIT {
         assertTrue(response.isSuccess());
         peer.receive(HeartbeatResponsePacket.class);
         peer.heartbeat();
+        peer.sendBytes(unknown); peer.awaitClosed();
     }
 
     @Test(timeout = 20000)
