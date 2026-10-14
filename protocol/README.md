@@ -34,7 +34,7 @@ v1 JSON 不与 v2 混用。升级前停旧后端、备份数据库，协调替�
 `golden-vectors.json` 是跨语言契约，含 Unicode、超过 JS 安全整数的游标和 Long.MAX_VALUE。Java 和 TS 都读取验证；显式更新协议后可运行 `node scripts/generate-golden.mjs` 重生成，普通构建不改写契约。
 
 ```sh
-mvn clean verify
+mvn -f backend/pom.xml clean verify
 cd frontend
 npm test
 npm run e2e:prepare

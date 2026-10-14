@@ -89,7 +89,7 @@ PostgreSQL 需预先创建数据库和有建表权限的账号。密码通过环
 
 ```sh
 # 项目根目录：后端单元与集成测试
-mvn clean verify
+mvn -f backend/pom.xml clean verify
 
 # 前端测试与生产构建
 cd frontend
