@@ -1,6 +1,6 @@
 # XIM
 
-基于 Netty 的单实例即时通信 MVP。前端使用 React + TypeScript + Vite，后端使用 Java 25 + Maven，支持浏览器 WebSocket 与 TCP 控制台客户端互通。共享前端通过 Tauri 2 支持 macOS、Windows、Android、iOS App，后端保持独立服务。
+基于 Netty 的单实例文本即时通信 MVP，适合小范围内测。前端使用 React + TypeScript + Vite，后端使用 Java 25 + Maven，支持浏览器 WebSocket 与 TCP 控制台客户端互通。共享前端通过 Tauri 2 提供 macOS、Windows、Android、iOS App 打包入口，后端保持独立服务。
 
 ## 核心功能
 
@@ -45,6 +45,8 @@ XIM_AUTH_DEMO=true ./backend/run.sh -Dxim.web.cookieSecure=false
 在 `frontend/` 配置 `.env.app.local` 中的 `XIM_APP_SERVER_URL=https://实际服务域名` 后，使用 `npm run app:macos`、`npm run app:windows`、`npm run app:android`、`npm run app:ios`。移动端首次执行对应 `app:android:init` / `app:ios:init`，按平台安装工具链并配置签名。桌面开发使用 `npm run app:dev`；Web 原有构建与部署命令继续有效。
 
 环境、Cookie/Origin 适配、各端签名与产物路径见 [App 打包说明](docs/APP_PACKAGING.md)，实际验证状态见 [多平台验收记录](docs/APP_ACCEPTANCE.md)。
+
+Web 已通过浏览器端到端验收，macOS arm64 已完成本机构建与核心聊天流程验证；Windows、Android、iOS 尚待构建和设备验收，原生 App 的受信任 HTTPS 登录也需在目标环境验证。
 
 ## 常用配置
 
@@ -94,6 +96,7 @@ mvn -f backend/pom.xml clean verify
 # 前端测试与生产构建
 cd frontend
 npm test
+npm run typecheck
 npm run build
 
 # 浏览器端到端测试（默认使用本机 Chrome）
@@ -121,6 +124,10 @@ npm run test:e2e
 ## 使用边界
 
 单账号只保留一条连接，主动登录会替换旧连接。「已发送」表示服务端已持久化，不表示对方已读；重试请使用原消息旁的按钮。
+
+联系人是全站用户目录，当前没有好友申请或拉黑。创建群聊最多选择 50 位伙伴，创建者自动加入，共可创建 51 人群；这是创建时的选择上限，后续按群号加入没有总人数上限。知道群号即可加入并查看该群历史，当前没有入群审批或群管理员权限。
+
+消息仅支持文本，尚无图片、文件、语音、撤回、对方已读回执或系统推送；移动端后台挂起时不保证及时通知。公开开放前需按目标规模完成容量压测和生产环境验收。
 
 项目面向单实例，在线路由不跨实例共享；尚无找回密码或账号删除。生产需由反向代理提供 HTTPS/WSS，原始 TCP 无 TLS。SQLite 在线备份使用 `scripts/sqlite-backup.py`，不要直接复制正在写入的数据库；删除数据库会丢失账号与聊天数据。
 
