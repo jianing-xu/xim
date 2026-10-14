@@ -1,6 +1,6 @@
 # XIM
 
-基于 Netty 的单实例即时通信 MVP。前端使用 React + TypeScript + Vite，后端使用 Java 25 + Maven，支持浏览器 WebSocket 与 TCP 控制台客户端互通。
+基于 Netty 的单实例即时通信 MVP。前端使用 React + TypeScript + Vite，后端使用 Java 25 + Maven，支持浏览器 WebSocket 与 TCP 控制台客户端互通。共享前端通过 Tauri 2 支持 macOS、Windows、Android、iOS App，后端保持独立服务。
 
 ## 核心功能
 
@@ -39,6 +39,12 @@ XIM_AUTH_DEMO=true ./backend/run.sh -Dxim.web.cookieSecure=false
 ```
 
 演示凭证为 `root/root`、`aaa/aaa`、`bbb/bbb`、`ccc/ccc`，仅用于开发。
+
+## App 打包
+
+在 `frontend/` 配置 `.env.app.local` 中的 `XIM_APP_SERVER_URL=https://实际服务域名` 后，使用 `npm run app:macos`、`npm run app:windows`、`npm run app:android`、`npm run app:ios`。移动端首次执行对应 `app:android:init` / `app:ios:init`，按平台安装工具链并配置签名。桌面开发使用 `npm run app:dev`；Web 原有构建与部署命令继续有效。
+
+环境、Cookie/Origin 适配、各端签名与产物路径见 [App 打包说明](docs/APP_PACKAGING.md)，实际验证状态见 [多平台验收记录](docs/APP_ACCEPTANCE.md)。
 
 ## 常用配置
 
