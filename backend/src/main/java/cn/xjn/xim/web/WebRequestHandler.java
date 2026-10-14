@@ -150,7 +150,7 @@ public class WebRequestHandler extends SimpleChannelInboundHandler<WebSocketFram
                     JSONArray users = (JSONArray) value;
                     require(users.size() <= 50, "群组最多选择 50 位用户");
                     LinkedHashSet<String> ids = new LinkedHashSet<>();
-                    ids.add(SessionManager.getSession(ctx.channel()).getUserId());
+                    // The shared handler adds the creator; this list contains selected partners only.
                     for (Object user : users) {
                         require(user instanceof String && ((String) user).length() <= 64, "成员编号无效");
                         ids.add((String) user);

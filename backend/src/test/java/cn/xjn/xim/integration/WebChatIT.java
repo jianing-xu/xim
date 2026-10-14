@@ -154,6 +154,40 @@ public class WebChatIT {
     }
 
     @Test(timeout = 15000)
+    public void createsGroupsWithFiftySelectedPartnersAndRejectsMore() throws Exception {
+        Peer creator = peer();
+        String creatorId = creator.login("root");
+        var store = cn.xjn.xim.storage.Storage.get();
+        var selected = new ArrayList<String>();
+        String prefix = "group_boundary_" + java.util.UUID.randomUUID();
+        for (int i = 0; i < 51; i++) selected.add(store.user(prefix + "_" + i).getUserId());
+
+        for (int count : List.of(49, 50)) {
+            creator.send("createGroup", "userIds", selected.subList(0, count));
+            JSONObject response = creator.receive("createGroup");
+            assertTrue(response.getBooleanValue("success"));
+            String group = response.getString("groupId"); groups.add(group);
+            creator.send("members", "groupId", group);
+            var members = creator.receive("members").getJSONArray("sessions");
+            assertEquals(count + 1, members.size());
+            assertEquals(count + 1, members.stream().map(value -> ((JSONObject) value).getString("userId")).distinct().count());
+            assertTrue(members.stream().anyMatch(value -> creatorId.equals(((JSONObject) value).getString("userId"))));
+        }
+
+        int conversationCount = store.conversations(creatorId).size();
+        creator.send("createGroup", "userIds", selected, "requestId", "too-many-members");
+        JSONObject error = creator.receive("error");
+        assertEquals("too-many-members", error.getString("requestId"));
+        assertEquals("群组最多选择 50 位用户", error.getString("reason"));
+        assertEquals(conversationCount, store.conversations(creatorId).size());
+
+        creator.send("createGroup", "userIds", List.of(creatorId, selected.getFirst(), selected.getFirst()));
+        String group = creator.receive("createGroup").getString("groupId"); groups.add(group);
+        creator.send("members", "groupId", group);
+        assertEquals(2, creator.receive("members").getJSONArray("sessions").size());
+    }
+
+    @Test(timeout = 15000)
     public void webAndTcpClientsExchangePrivateAndGroupMessages() throws Exception {
         try (TcpTestServer tcp = new TcpTestServer(); TcpPeer terminal = new TcpPeer(tcp.port())) {
             Peer browser = peer(); String browserId = browser.login("root");
