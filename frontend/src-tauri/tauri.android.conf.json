@@ -1,0 +1,1 @@
+{ "bundle": { "android": { "minSdkVersion": 24, "versionCode": 10000 } } }
