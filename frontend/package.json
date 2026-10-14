@@ -12,7 +12,7 @@
     "test": "vitest run src",
     "test:e2e": "playwright test",
     "e2e:prepare": "npm run build && mvn -f ../backend/pom.xml package -DskipTests dependency:copy-dependencies -DincludeScope=runtime -DoutputDirectory=target/release/lib && node ../scripts/package-backend.mjs",
-    "proto:generate": "pbjs -t static-module -w es6 --force-long --no-service -o src/generated/xim.js ../protocol/xim.proto && pbts -o src/generated/xim.d.ts src/generated/xim.js",
+    "proto:generate": "node -e \"require('fs').mkdirSync('src/generated', { recursive: true })\" && pbjs -t static-module -w es6 --force-long --no-service -o src/generated/xim.js ../protocol/xim.proto && pbts -o src/generated/xim.d.ts src/generated/xim.js",
     "prebuild": "npm run proto:generate",
     "pretest": "npm run proto:generate",
     "pretypecheck": "npm run proto:generate",
