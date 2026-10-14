@@ -9,7 +9,9 @@ export default defineConfig(({ mode }) => {
   };
   return {
     plugins: [react()],
-    server: { port: 5173, strictPort: true, proxy },
+    build: { outDir: mode === 'app' ? 'dist-app' : 'dist', target: ['es2022', 'safari15'] },
+    clearScreen: false,
+    server: { host: process.env.TAURI_DEV_HOST || '127.0.0.1', port: 5173, strictPort: true, proxy, ...(process.env.TAURI_DEV_HOST ? { hmr: { protocol: 'ws', host: process.env.TAURI_DEV_HOST, port: 1421 } } : {}) },
     preview: { port: 5173, strictPort: true, proxy },
   };
 });

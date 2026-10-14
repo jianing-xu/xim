@@ -1,3 +1,5 @@
+import { deadlineSignal } from './platform/abort';
+import { transport, type ChatSocket } from './platform/transport';
 import { compareInt, maxInt, positive, count, integer, MAX_INT64, type Int64 } from './integers';
 import { encodeClientEvent, decodeServerEvent, normalizeCache, MAX_FRAME_BYTES } from './protocol-wire';
 import type { ChatState, ClientEvent, Conversation, ConversationSummary, Message, ServerEvent } from './protocol';
@@ -28,7 +30,7 @@ function messageId(): string {
 export class ChatClient {
   private state = initialState();
   private listeners = new Set<() => void>();
-  private socket: WebSocket | null = null;
+  private socket: ChatSocket | null = null;
   private stopped = true;
   private retry = 0;
   private retryTimer?: ReturnType<typeof setTimeout>;
@@ -119,11 +121,11 @@ export class ChatClient {
 
   private sessionEndpoint() { return this.url().replace(/^ws/, 'http').replace(/\/ws(?:\?.*)?$/, '/api/session'); }
 
-  private saveCredential(ticket: string, socket: WebSocket | null) {
+  private saveCredential(ticket: string, socket: ChatSocket | null) {
     this.credentialRequest?.abort();
     const request = new AbortController(); this.credentialRequest = request;
-    void fetch(this.sessionEndpoint(), { method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ticket }), signal: AbortSignal.any([request.signal, AbortSignal.timeout(8000)]) }).then(response => {
+    void transport.session(this.sessionEndpoint(), { method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ticket }), signal: deadlineSignal(8000, request.signal) }).then(response => {
         if (!response.ok) throw new Error('Credential exchange failed');
         if (!request.signal.aborted && this.socket === socket) {
           try { localStorage.removeItem('xim.logoutPending'); } catch { /* Optional. */ }
@@ -147,7 +149,7 @@ export class ChatClient {
     if (!this.logoutPending || this.logoutRequest) return;
     this.logoutRequest = true;
     this.patch({ loginPending: true });
-    void fetch(this.sessionEndpoint(), { method: 'DELETE', credentials: 'include', signal: AbortSignal.timeout(8000) }).then(response => {
+    void transport.session(this.sessionEndpoint(), { method: 'DELETE', credentials: 'include', signal: deadlineSignal(8000) }).then(response => {
       if (!response.ok) throw new Error('Logout failed');
       this.logoutPending = false;
       try { localStorage.removeItem('xim.logoutPending'); } catch { /* Optional. */ }
@@ -222,7 +224,7 @@ export class ChatClient {
   private connect() {
     if (this.stopped) return;
     this.patch({ connection: 'connecting' });
-    const socket = new WebSocket(this.url());
+    const socket = transport.socket(this.url());
     socket.binaryType = 'arraybuffer';
     this.socket = socket;
     const active = () => !this.stopped && this.socket === socket;
@@ -270,7 +272,7 @@ export class ChatClient {
     socket.addEventListener('message', event => {
       if (!active()) return;
       if (incoming.length >= 128) { this.disconnect(socket); return; }
-      incoming.push(event.data); drain();
+      incoming.push((event as MessageEvent).data); drain();
     });
     socket.addEventListener('close', () => {
       if (active()) this.disconnected(socket);
@@ -280,12 +282,12 @@ export class ChatClient {
     });
   }
 
-  private disconnect(socket: WebSocket) {
+  private disconnect(socket: ChatSocket) {
     if (this.socket !== socket || this.stopped) return;
     this.disconnected(socket); socket.close();
   }
 
-  private disconnected(socket: WebSocket) {
+  private disconnected(socket: ChatSocket) {
     if (this.socket !== socket || this.stopped) return;
     this.socket = null;
     this.cancelContacts('连接已断开，请恢复后重试');

@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "main",
+  "description": "Local XIM UI: binary chat transport and session exchange only",
+  "windows": ["main"],
+  "permissions": ["core:event:allow-listen", "core:event:allow-unlisten", "allow-socket-open", "allow-socket-send", "allow-socket-close", "allow-session-exchange"]
+}
